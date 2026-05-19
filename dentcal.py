@@ -220,6 +220,7 @@ if menu == "Agenda Diaria Sillon":
 
         st.divider()
         
+        
         # --- 2. RANGOS OCUPADOS ---
         if not df_activas.empty:
             st.write("### ⏳ Horarios Reservados")
@@ -283,27 +284,33 @@ elif menu == "Agendar Cita Dental":
             if st.form_submit_button("Confirmar Espacio"):
                 if h_i >= h_f:
                     st.error("La hora de fin debe ser posterior a la de inicio.")
-                elif verificar_disponibilidad(fecha, h_i, h_f):
-                    try:
-                        conn = conectar_db()
-                        cursor = conn.cursor()
-                        
-                        # Query estándar limpio para TiDB Cloud
-                        sql = """
-                            INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) 
-                            VALUES (%s, %s, %s, %s)
-                        """
-                        cursor.execute(sql, (p_id, fecha, h_i, h_f))
-                        cursor.close()
-                        conn.close()
-                        
-                        st.success("✅ ¡Cita dental reservada correctamente!")
-                        st.balloons()
-                        t_sleep.sleep(1.5)
-                        st.rerun()
-                        
-                    except Exception as e:
-                        st.error(f"Error al guardar la cita en la nube: {e}")
+                else:
+                    # Asumiendo que verificar_disponibilidad devuelve True si está LIBRE
+                    # Si devuelve True si está OCUPADO, cambia a: if not verificar_disponibilidad(fecha, h_i, h_f):
+                    esta_disponible = verificar_disponibilidad(fecha, h_i, h_f)
+                    
+                    if not esta_disponible:
+                        st.error("❌ El horario seleccionado ya se encuentra ocupado. Por favor, elige otra hora.")
+                    else:
+                        try:
+                            conn = conectar_db()
+                            cursor = conn.cursor()
+                            
+                            sql = """
+                                INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) 
+                                VALUES (%s, %s, %s, %s)
+                            """
+                            cursor.execute(sql, (p_id, fecha, h_i, h_f))
+                            cursor.close()
+                            conn.close()
+                            
+                            st.success("✅ ¡Cita dental reservada correctamente!")
+                            st.balloons()
+                            t_sleep.sleep(1.5)
+                            st.rerun()
+                            
+                        except Exception as e:
+                            st.error(f"Error al guardar la cita en la nube: {e}")
 
 # --- MÓDULO 3: PACIENTES Y EXPEDIENTES ---
 elif menu == "Pacientes y Expedientes":
