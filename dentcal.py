@@ -22,7 +22,7 @@ def validar_login(usuario, contra):
         conn = conectar_db()  # Forzamos la conexión TLS de TiDB Cloud
         cursor = conn.cursor()
         # Buscamos en tu tabla de usuarios de la nube
-        query = "SELECT rol FROM usuarios WHERE usuario = %s AND contrasena = %s"
+        query = "SELECT rol FROM usuarios WHERE username = %s AND password = %s"
         cursor.execute(query, (usuario, contra))
         resultado = cursor.fetchone()
         cursor.close()
@@ -32,11 +32,13 @@ def validar_login(usuario, contra):
         # Si da error de "Insecure transport", sabremos de inmediato qué función falta corregir
         st.error(f"Error en login: {e}")
         return None
+    
 if 'rol' not in st.session_state:
     st.session_state.rol = None
 
 if 'usuario' not in st.session_state:
     st.session_state.usuario = None
+
 # --- CONTROL DE ACCESO ---
 if st.session_state.rol is None:
     st.title("🦷 DentCal: Acceso Clínico")
