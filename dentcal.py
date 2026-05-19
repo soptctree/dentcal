@@ -7,13 +7,14 @@ import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
 def conectar_db():
     return pymysql.connect(
-        host="localhost",      # Apunta a tu laptop
-        port=3306,             # Puerto estándar de MySQL/XAMPP
-        user="root",           # Usuario por defecto en entornos locales
-        password="",           # Por defecto XAMPP viene vacío (si pusiste clave, agrégala aquí)
-        database="dentcal_db", 
+        host=st.secrets["db_host"],
+        port=int(st.secrets["db_port"]),
+        user=st.secrets["db_user"],
+        password=st.secrets["db_password"],
+        database=st.secrets["db_name"],
+        ssl_verify_cert=False,
+        ssl_verify_identity=False,
         autocommit=True
-        # Quitamos la línea de SSL porque localmente no la necesitas
     )
     
 
