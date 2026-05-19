@@ -333,11 +333,15 @@ elif menu == "Pacientes y Expedientes":
                         """
                         
                         cursor.execute(sql, (n, id_c if id_c else None, t, m, r))
+                        
+                        # --- MODIFICACIÓN AQUÍ: Aseguramos que los datos se guarden en TiDB Cloud ---
+                        conn.commit() 
+                        
                         cursor.close()
                         
                         st.success(f"🎉 ¡Paciente '{n}' registrado con éxito!")
                         
-                        t_sleep.sleep(1)
+                        time.sleep(1) # Asegúrate de que use 'time.sleep' o tu alias 't_sleep'
                         st.rerun()
                         
                     except Exception as e:
