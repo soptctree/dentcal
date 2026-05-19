@@ -535,16 +535,23 @@ elif menu == "Pacientes y Expedientes":
     with tab4:
         st.write("### 🗂️ Ficha Médica e Historial Clínico Unificado")
         
-        df_p_all = obtener_pacientes()
-        
+        # --- CORRECCIÓN AQUÍ: Traemos los datos completos directo de la nube ---
+        try:
+            conn_all = conectar_db()
+            df_p_all = pd.read_sql("SELECT id_paciente, nombre, cedula, telefono, correo, referencia FROM pacientes", conn_all)
+            conn_all.close()
+        except Exception as e:
+            st.error(f"Error al conectar con el historial unificado: {e}")
+            df_p_all = pd.DataFrame()
+
         if df_p_all.empty:
             st.warning("No hay pacientes registrados en el sistema.")
         else:
-            # 1. Buscador centralizado de paciente
+            # 1. Buscador centralizado de paciente (Corregido y optimizado para evitar KeyError)
             paciente_master_id = st.selectbox(
                 "Seleccione el paciente para abrir su Expediente Único:",
                 options=df_p_all['id_paciente'].tolist(),
-                format_func=lambda x: f"{df_p_all[df_p_all['id_paciente']==x]['nombre'].values[0]} | Cédula: {df_p_all[df_p_all['id_paciente']==x]['cedula'].values[0]}",
+                format_func=lambda x: f"{df_p_all[df_p_all['id_paciente']==x]['nombre'].values[0]} | Cédula: {df_p_all[df_p_all['id_paciente']==x]['cedula'].values[0] if df_p_all[df_p_all['id_paciente']==x]['cedula'].values[0] else 'S/N'}",
                 key="sb_master_history"
             )
             
