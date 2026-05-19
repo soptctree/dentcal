@@ -301,34 +301,34 @@ elif menu == "Pacientes y Expedientes":
             m = c2.text_input("Correo Electrónico")
             r = st.text_area("Alergías, Enfermedades Sistémicas o Antecedentes Médicos relevantes")
             
-            # --- REEMPLAZO DESDE LA LÍNEA 304 ---
-        # --- REEMPLAZA DESDE LA LÍNEA 304 EN ADELANTE CON ESTO ---
-    if st.form_submit_button("Guardar Ficha Paciente"):
-        if n.strip() == "":
-            st.error("❌ El nombre completo del paciente es obligatorio.")
-        else:
-            try:
-                conn = conectar_db()
-                cursor = conn.cursor()
-                
-                sql = """
-                    INSERT INTO pacientes (nombre, cedula, telefono, correo, referencia) 
-                    VALUES (%s, %s, %s, %s, %s)
-                """
-                
-                cursor.execute(sql, (n, id_c if id_c else None, t, m, r))
-                cursor.close()
-                
-                st.success(f"🎉 ¡Paciente '{n}' registrado con éxito!")
-                
-                t_sleep.sleep(1)
-                st.rerun()
-                
-            except Exception as e:
-                st.error(f"Error al guardar: {e}")
-            finally:
-                if 'conn' in locals() and conn:
-                    conn.close()
+            # El botón de abajo lleva exactamente 12 espacios hacia la derecha 
+            # para quedar alineado perfectamente con los inputs de arriba
+            if st.form_submit_button("Guardar Ficha Paciente"):
+                if n.strip() == "":
+                    st.error("❌ El nombre completo del paciente es obligatorio.")
+                else:
+                    try:
+                        conn = conectar_db()
+                        cursor = conn.cursor()
+                        
+                        sql = """
+                            INSERT INTO pacientes (nombre, cedula, telefono, correo, referencia) 
+                            VALUES (%s, %s, %s, %s, %s)
+                        """
+                        
+                        cursor.execute(sql, (n, id_c if id_c else None, t, m, r))
+                        cursor.close()
+                        
+                        st.success(f"🎉 ¡Paciente '{n}' registrado con éxito!")
+                        
+                        t_sleep.sleep(1)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error al guardar: {e}")
+                    finally:
+                        if 'conn' in locals() and conn:
+                            conn.close()
 
     with tab2:
         st.write("### 📜 Registro Histórico de Evoluciones Dentales")
