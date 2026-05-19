@@ -354,7 +354,7 @@ elif menu == "Pacientes y Expedientes":
         st.write("### 📜 Registro Histórico de Evoluciones Dentales")
         try:
             conn_tab2 = conectar_db()
-            df_p = pd.read_sql("SELECT id_paciente, nombre, cedula, telefono, correo, referencia, fecha_registro FROM pacientes", conn_tab2)
+            df_p = pd.read_sql("SELECT id_paciente, nombre, cedula, telefono, correo, referencia FROM pacientes", conn_tab2)
             conn_tab2.close()
         except Exception as e:
             st.error(f"Error al conectar base de datos en pestaña 2: {e}")
@@ -375,8 +375,7 @@ elif menu == "Pacientes y Expedientes":
             
             # --- 🌟 PLUS: FICHA DE DATOS PERSONALES Y EDICIÓN 🌟 ---
             # Formateamos la fecha de registro para mostrarla limpia
-            f_reg = info_paciente['fecha_registro']
-            f_reg_str = f_reg.strftime('%d/%m/%Y') if hasattr(f_reg, 'strftime') else "No registrada"
+            f_reg_str = "No disponible (Nube)"
 
             with st.expander(f"👤 Ficha de Contacto: {info_paciente['nombre']} (Registrado el: {f_reg_str})", expanded=True):
                 col_info1, col_info2 = st.columns(2)
