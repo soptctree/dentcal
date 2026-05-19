@@ -27,7 +27,9 @@ def validar_login(usuario, contra):
         resultado = cursor.fetchone()
         cursor.close()
         conn.close()
-        return resultado  # Devuelve el rol si existe
+        if resultado:
+          return resultado[0] 
+        return None
     except Exception as e:
         # Si da error de "Insecure transport", sabremos de inmediato qué función falta corregir
         st.error(f"Error en login: {e}")
@@ -49,6 +51,7 @@ if st.session_state.rol is None:
             rol_encontrado = validar_login(u, p)
             if rol_encontrado:
                 st.session_state.rol = rol_encontrado
+                st.session_state.usuario = u
                 st.rerun()
             else:
                 st.error("Credenciales incorrectas")
