@@ -17,26 +17,21 @@ def conectar_db():
     )
     
 
-def validar_login(usuario, clave):
+def validar_login(usuario, contra):
     try:
-        conn = conectar_db()
+        conn = conectar_db()  # Forzamos la conexión TLS de TiDB Cloud
         cursor = conn.cursor()
-        sql = "SELECT rol FROM usuarios WHERE username = %s AND password = %s"
-        cursor.execute(sql, (usuario, clave))
+        # Buscamos en tu tabla de usuarios de la nube
+        query = "SELECT rol FROM usuarios WHERE usuario = %s AND contrasena = %s"
+        cursor.execute(query, (usuario, contra))
         resultado = cursor.fetchone()
-        
-        if resultado:
-            return resultado[0]  # Retornamos el rol (Admin, Odontologo, etc.)
-        return None
+        cursor.close()
+        conn.close()
+        return resultado  # Devuelve el rol si existe
     except Exception as e:
+        # Si da error de "Insecure transport", sabremos de inmediato qué función falta corregir
         st.error(f"Error en login: {e}")
         return None
-    finally:
-        if 'conn' in locals() and conn:
-            conn.close()
-            
-if "rol" not in st.session_state:
-    st.session_state.rol = None
 
 # --- CONTROL DE ACCESO ---
 if st.session_state.rol is None:
@@ -111,26 +106,32 @@ def modulo_admin_usuarios():
 
 def obtener_pacientes():
     try:
-        conn = conectar_db()
-        # Traemos todos los campos necesarios para poder editarlos luego
-        df = pd.read_sql("SELECT id_paciente, nombre, IFNULL(cedula, '') as cedula, IFNULL(telefono, '') as telefono, IFNULL(correo, '') as correo, IFNULL(referencia, '') as referencia, fecha_registro FROM pacientes", conn)
+        conn = conectar_db()  # Usa la conexión TLS obligatoria de TiDB
+        query = "SELECT id_paciente, nombre FROM pacientes"
+        df = pd.read_sql(query, conn)
         conn.close()
         return df
-    except:
-        return pd.DataFrame(columns=['id_paciente', 'nombre', 'cedula', 'telefono', 'correo', 'referencia', 'fecha_registro'])
+    except Exception as e:
+        st.error(f"Error al obtener pacientes de la nube: {e}")
+        return pd.DataFrame()  # Devuelve un contenedor vacío seguro si falla
 
 
-def verificar_disponibilidad(fecha, h_inicio, h_fin):
-    conn = conectar_db()
-    query = f"""
-    SELECT id_cita FROM citas WHERE fecha = '{fecha}' AND estado != 'Cancelada'
-    AND (('{h_inicio}' >= hora_inicio AND '{h_inicio}' < hora_fin) OR
-         ('{h_fin}' > hora_inicio AND '{h_fin}' <= hora_fin) OR
-         (hora_inicio >= '{h_inicio}' AND hora_inicio < '{h_fin}'))
-    """
-    df = pd.read_sql(query, conn)
-    conn.close()
-    return df.empty
+def verificar_disponibilidad(fecha, hora_inicio, hora_fin):
+    try:
+        conn = conectar_db()  # Conexión directa a TiDB
+        cursor = conn.cursor()
+        query = """
+            SELECT * FROM citas 
+            WHERE fecha = %s AND NOT (%s >= hora_fin OR %s <= hora_inicio)
+        """
+        cursor.execute(query, (fecha, hora_inicio, hora_fin))
+        resultado = cursor.fetchone()
+        cursor.close()
+        conn.close()
+        return resultado is None  # Devuelve True si el espacio está libre
+    except Exception as e:
+        st.error(f"Error al verificar disponibilidad: {e}")
+        return False
 
 
 
@@ -271,20 +272,29 @@ elif menu == "Agendar Cita Dental":
             h_f = c3.time_input("Hora Fin", value=time(8,30))
             
             if st.form_submit_button("Confirmar Espacio"):
-                if h_i >= h_f: 
+                if h_i >= h_f:
                     st.error("La hora de fin debe ser posterior a la de inicio.")
                 elif verificar_disponibilidad(fecha, h_i, h_f):
-                    conn = conectar_db()
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) VALUES (%s,%s,%s,%s)", (p_id, fecha, h_i, h_f))
-                    conn.commit()
-                    conn.close()
-                    st.success("✅ ¡Cita dental reservada correctamente!")
-                    st.balloons()
-                    t_sleep.sleep(1.5)
-                    st.rerun()
-                else: 
-                    st.error("❌ El sillón dental se encuentra ocupado en ese rango de tiempo.")
+                    try:
+                        conn = conectar_db()
+                        cursor = conn.cursor()
+                        
+                        # Query estándar limpio para TiDB Cloud
+                        sql = """
+                            INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) 
+                            VALUES (%s, %s, %s, %s)
+                        """
+                        cursor.execute(sql, (p_id, fecha, h_i, h_f))
+                        cursor.close()
+                        conn.close()
+                        
+                        st.success("✅ ¡Cita dental reservada correctamente!")
+                        st.balloons()
+                        t_sleep.sleep(1.5)
+                        st.rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Error al guardar la cita en la nube: {e}")
 
 # --- MÓDULO 3: PACIENTES Y EXPEDIENTES ---
 elif menu == "Pacientes y Expedientes":
@@ -628,24 +638,29 @@ elif menu == "Configuración":
         with tab_info:
             st.markdown("### 💻 Estado de DentCal")
             
-            # Intentamos una conexión rápida de prueba para verificar el estado real
+            # Intentamos una conexión rápida de prueba para verificar el estado real en la nube
             try:
                 test_conn = conectar_db()
                 cursor_test = test_conn.cursor()
-                # Le pedimos al servidor MySQL que nos diga su versión actual
+                # Le pedimos al servidor en la nube que nos diga su versión actual
                 cursor_test.execute("SELECT VERSION()")
                 version_mysql = cursor_test.fetchone()[0]
+                cursor_test.close()
                 test_conn.close()
                 
-                # Si todo sale bien, muestra el éxito con datos reales del servidor
-                st.success(f"🟢 **Conexión Exitosa:** El sistema está conectado a la base de datos local corriendo en XAMPP (MySQL v{version_mysql}).")
-                st.caption("📍 Host: `localhost` | Puerto: `3306` | Base de Datos: `dentcal_db`")
+                # Extramos los datos dinámicamente de tus secretos cargados en Streamlit Cloud
+                host_actual = st.secrets["db_host"]
+                db_actual = st.secrets["db_name"]
+                
+                # Si todo sale bien, muestra el éxito con datos reales del servidor TiDB Cloud
+                st.success(f"🟢 **Conexión Exitosa:** El sistema está conectado a la base de datos en la nube (TiDB v{version_mysql}).")
+                st.markdown(f"📍 **Host:** `{host_actual}` | **Base de Datos:** `{db_actual}`")
                 
             except Exception as e:
-                # Si XAMPP está apagado o el puerto bloqueado, saltará este aviso en rojo de inmediato
-                st.error(f"🔴 **Servidor Desconectado:** No se pudo establecer comunicación con XAMPP/MySQL.")
+                # Si el internet falla o las credenciales cambian, saltará este aviso de inmediato
+                st.error(f"🔴 **Servidor Desconectado:** No se pudo establecer comunicación con TiDB Cloud.")
                 st.warning(f"Detalle del error: {e}")
-                st.info("💡 Asegúrate de abrir el Panel de Control de XAMPP y verificar que el servicio 'MySQL' esté iniciado (en verde).")
+                st.info("💡 Asegúrate de que las variables en los 'Secrets' de Streamlit Cloud correspondan con los accesos TLS de tu clúster.")
             
     else:
         st.warning("⚠️ Acceso denegado. Este módulo está reservado exclusivamente para cuentas con rol de Administrador.")
