@@ -12,9 +12,8 @@ def conectar_db():
         user=st.secrets["db_user"],
         password=st.secrets["db_password"],
         database=st.secrets["db_name"],
-        ssl_verify_cert=False,
-        ssl_verify_identity=False,
-        autocommit=True
+        autocommit=True,
+        ssl={'ssl': {}}  # 🚨 ESTA LÍNEA ES LA CLAVE: Activa el cifrado TLS obligatorio de TiDB
     )
     
 
