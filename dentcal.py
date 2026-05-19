@@ -32,7 +32,11 @@ def validar_login(usuario, contra):
         # Si da error de "Insecure transport", sabremos de inmediato qué función falta corregir
         st.error(f"Error en login: {e}")
         return None
+if 'rol' not in st.session_state:
+    st.session_state.rol = None
 
+if 'usuario' not in st.session_state:
+    st.session_state.usuario = None
 # --- CONTROL DE ACCESO ---
 if st.session_state.rol is None:
     st.title("🦷 DentCal: Acceso Clínico")
@@ -342,7 +346,13 @@ elif menu == "Pacientes y Expedientes":
 
     with tab2:
         st.write("### 📜 Registro Histórico de Evoluciones Dentales")
-        df_p = obtener_pacientes()
+        try:
+            conn_tab2 = conectar_db()
+            df_p = pd.read_sql("SELECT id_paciente, nombre, cedula, telefono, correo, referencia, fecha_registro FROM pacientes", conn_tab2)
+            conn_tab2.close()
+        except Exception as e:
+            st.error(f"Error al conectar base de datos en pestaña 2: {e}")
+            df_p = pd.DataFrame()
         
         # Selector de pacientes con opción vacía inicial
         p_id_hist = st.selectbox(
