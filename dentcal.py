@@ -195,24 +195,36 @@ if menu == "Agenda Diaria Sillon":
         df_todas = pd.read_sql(query, conn)
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- MAPA DE DISPONIBILIDAD HORARIA ---
-        st.write("### 🕒 Ocupación del Sillón Dental")
-        horas_dia = pd.date_range(start="07:00", end="17:00", freq="30min").time
+        # --- MAPA DE DISPONIBILIDAD HORARIA (CORTES DE 15 MINUTOS) ---
+        st.write("### 🕒 Ocupación del Sillón Dental (Vista por Cuartos de Hora)")
         
-        num_cols = 5
+        # 1. Cambiamos la frecuencia a 15 minutos
+        horas_dia = pd.date_range(start="07:00", end="17:00", freq="15min").time
+        
+        # 2. Cambiamos a 4 columnas (una para :00, :15, :30, :45)
+        num_cols = 4
         cols = st.columns(num_cols)
         
         for i, h in enumerate(horas_dia):
             ocupado = False
+            
+            # 3. Calculamos dónde termina este micro-bloque de 15 minutos
+            dt_bloque_inicio = datetime.combine(datetime.min, h)
+            dt_bloque_fin = dt_bloque_inicio + timedelta(minutes=15)
+            bloque_fin = dt_bloque_fin.time()
+            
             if not df_activas.empty:
                 for _, r in df_activas.iterrows():
                     inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                     fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-                    if h >= inicio and h < fin:
+                    
+                    # Regla matemática de colisión para bloques de 15 minutos
+                    if h < fin and bloque_fin > inicio:
                         ocupado = True
                         break
             
             with cols[i % num_cols]:
+                # Mantenemos tus componentes de st.error y st.success originales
                 if ocupado: 
                     st.error(f"{h.strftime('%H:%M')}")
                 else: 
