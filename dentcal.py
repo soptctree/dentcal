@@ -195,41 +195,112 @@ if menu == "Agenda Diaria Sillon":
         df_todas = pd.read_sql(query, conn)
         df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- MAPA DE DISPONIBILIDAD HORARIA (CORTES DE 15 MINUTOS) ---
-        st.write("### 🕒 Ocupación del Sillón Dental (Vista por Cuartos de Hora)")
+        # --- MAPA DE DISPONIBILIDAD HORARIA RESPONSIVO (COMPATIBLE CON MÓVIL) ---
+        st.write("### 🕒 Ocupación del Sillón Dental")
         
-        # 1. Cambiamos la frecuencia a 15 minutos
-        horas_dia = pd.date_range(start="07:00", end="17:00", freq="15min").time
+        # Agrupamos las horas por bloques enteros para armar las filas
+        # Desde las 07 hasta las 17
+        horas_base = range(7, 18) 
+        cuartos = [0, 15, 30, 45]
         
-        # 2. Cambiamos a 4 columnas (una para :00, :15, :30, :45)
-        num_cols = 4
-        cols = st.columns(num_cols)
+        # Estilos CSS personalizados para forzar la grilla compacta en celulares y PC
+        css_grid = """
+        <style>
+        .grid-container {
+            display: grid;
+            grid-template-columns: 80px repeat(4, 1fr);
+            gap: 6px;
+            font-family: Arial, sans-serif;
+            margin-bottom: 20px;
+        }
+        .grid-header {
+            background-color: #f0f2f6;
+            color: #31333F;
+            padding: 6px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 13px;
+            border-radius: 4px;
+        }
+        .grid-time-label {
+            background-color: #e1e4eb;
+            color: #31333F;
+            padding: 8px;
+            font-weight: bold;
+            text-align: center;
+            font-size: 14px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .grid-slot-libre {
+            background-color: #DFF2BF;
+            color: #4F8A10;
+            border: 1px solid #4F8A10;
+            padding: 8px;
+            text-align: center;
+            font-size: 13px;
+            border-radius: 4px;
+            font-weight: 500;
+        }
+        .grid-slot-ocupado {
+            background-color: #FFD2D2;
+            color: #D8000C;
+            border: 1px solid #D8000C;
+            padding: 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 13px;
+            border-radius: 4px;
+        }
+        </style>
+        """
+        st.markdown(css_grid, unsafe_html=True)
         
-        for i, h in enumerate(horas_dia):
-            ocupado = False
+        # Iniciamos la estructura de la grilla HTML
+        html_grid = """
+        <div class='grid-container'>
+            <div class='grid-header'>Hora</div>
+            <div class='grid-header'>:00</div>
+            <div class='grid-header'>:15</div>
+            <div class='grid-header'>:30</div>
+            <div class='grid-header'>:45</div>
+        """
+        
+        # Recorremos cada hora entera para construir fila por fila
+        for hora in horas_base:
+            # Añadimos la etiqueta de la hora al inicio de la fila (Ej: "08:00")
+            html_grid += f"<div class='grid-time-label'>{hora:02d}:00</div>"
             
-            # 3. Calculamos dónde termina este micro-bloque de 15 minutos
-            dt_bloque_inicio = datetime.combine(datetime.min, h)
-            dt_bloque_fin = dt_bloque_inicio + timedelta(minutes=15)
-            bloque_fin = dt_bloque_fin.time()
-            
-            if not df_activas.empty:
-                for _, r in df_activas.iterrows():
-                    inicio = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-                    fin = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+            for cuarto in cuartos:
+                h = time(hora, cuarto)
+                
+                # Calculamos el rango de este micro-bloque de 15 minutos
+                dt_bloque_inicio = datetime.combine(datetime.min, h)
+                dt_bloque_fin = dt_bloque_inicio + timedelta(minutes=15)
+                bloque_fin = dt_bloque_fin.time()
+                
+                ocupado = False
+                if not df_activas.empty:
+                    for _, r in df_activas.iterrows():
+                        inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                        fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                        
+                        if h < fin_cita and bloque_fin > inicio_cita:
+                            ocupado = True
+                            break
+                
+                # Generamos el casillero correspondiente basado en su estado
+                if ocupado:
+                    html_grid += f"<div class='grid-slot-ocupado'>🔴 Ocup.</div>"
+                else:
+                    html_grid += f"<div class='grid-slot-libre'>🟢 Libre</div>"
                     
-                    # Regla matemática de colisión para bloques de 15 minutos
-                    if h < fin and bloque_fin > inicio:
-                        ocupado = True
-                        break
-            
-            with cols[i % num_cols]:
-                # Mantenemos tus componentes de st.error y st.success originales
-                if ocupado: 
-                    st.error(f"{h.strftime('%H:%M')}")
-                else: 
-                    st.success(f"{h.strftime('%H:%M')}")
-
+        html_grid += "</div>"
+        
+        # Renderizamos la grilla completa de un solo golpe
+        st.markdown(html_grid, unsafe_html=True)
         st.divider()
         
         
