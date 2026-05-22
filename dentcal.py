@@ -185,21 +185,30 @@ if menu == "Agenda Diaria Sillon":
     st.subheader("📋 Control de Citas del Día")
     fecha_agenda = st.date_input("Ver día:", value=datetime.now())
     
+    # Formateamos la fecha como texto estable para evitar problemas de tipos con TiDB
+    fecha_str = fecha_agenda.strftime("%Y-%m-%d")
+    
     conn = conectar_db()
-    query = f"""
+    query = """
         SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
-        FROM citas c JOIN pacientes p ON c.id_paciente = p.id_paciente 
-        WHERE c.fecha = '{fecha_agenda}' ORDER BY c.hora_inicio ASC
+        FROM citas c 
+        JOIN pacientes p ON c.id_paciente = p.id_paciente 
+        WHERE c.fecha = %s 
+        ORDER BY c.hora_inicio ASC
     """
     try:
-        df_todas = pd.read_sql(query, conn)
-        df_activas = df_todas[df_todas['estado'] != 'Cancelada']
+        # Pasamos la fecha usando tupla de parámetros seguros
+        df_todas = pd.read_sql(query, conn, params=[fecha_str])
+        
+        # Inicializamos df_activas vacío por si df_todas no tiene registros
+        df_activas = pd.DataFrame()
+        if not df_todas.empty:
+            df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
         # --- MAPA DE DISPONIBILIDAD HORARIA RESPONSIVO (COMPATIBLE CON MÓVIL) ---
         st.write("### 🕒 Ocupación del Sillón Dental")
         
-        # Agrupamos las horas por bloques enteros para armar las filas
-        # Desde las 07 hasta las 17
+        # Agrupamos las horas por bloques enteros para armar las filas (Desde las 07 hasta las 17)
         horas_base = range(7, 18) 
         cuartos = [0, 15, 30, 45]
         
@@ -256,7 +265,8 @@ if menu == "Agenda Diaria Sillon":
         }
         </style>
         """
-        st.markdown(css_grid, unsafe_html=True)
+        # CORRECCIÓN AQUÍ: Renderizamos 'css_grid' en lugar de 'html_grid' que no existía todavía
+        st.markdown(css_grid, unsafe_allow_html=True)
         
         # Iniciamos la estructura de la grilla HTML
         html_grid = """
@@ -300,9 +310,8 @@ if menu == "Agenda Diaria Sillon":
         html_grid += "</div>"
         
         # Renderizamos la grilla completa de un solo golpe
-        st.markdown(html_grid, unsafe_html=True)
+        st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
-        
         
         # --- 2. RANGOS OCUPADOS ---
         if not df_activas.empty:
