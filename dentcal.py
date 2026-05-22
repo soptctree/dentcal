@@ -205,13 +205,46 @@ if menu == "Agenda Diaria Sillon":
         if not df_todas.empty:
             df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- MAPA DE DISPONIBILIDAD HORARIA RESPONSIVO ---
+        # --- 🕒 LÓGICA DE OCUPACIÓN Y ESTADÍSTICAS ---
+        horas_base = range(7, 18)  # De 7 AM a 5 PM
+        cuartos = [0, 15, 30, 45]
+        total_bloques_dia = len(horas_base) * len(cuartos)  # 11 horas * 4 = 44 bloques
+        
+        # Contamos cuántas citas reales (únicas) hay hoy y cuántos bloques están ocupados
+        total_citas_hoy = len(df_activas) if not df_activas.empty else 0
+        bloques_ocupados = 0
+        
+        # Primero hacemos un conteo previo de bloques ocupados para las métricas
+        for hora in horas_base:
+            for cuarto in cuartos:
+                h = time(hora, cuarto)
+                bloque_inicio_time = datetime.combine(datetime.min, h).time()
+                bloque_fin_time = (datetime.combine(datetime.min, h) + timedelta(minutes=15)).time()
+                
+                if not df_activas.empty:
+                    for _, r in df_activas.iterrows():
+                        inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                        fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                        
+                        if bloque_inicio_time < fin_cita and bloque_fin_time > inicio_cita:
+                            bloques_ocupados += 1
+                            break
+                            
+        bloques_disponibles = total_bloques_dia - bloques_ocupados
+
+        # --- TITULO Y TARJETAS DE RESUMEN (MÉTRICAS) ---
         st.write("### 🕒 Ocupación del Sillón Dental")
         
-        horas_base = range(7, 18) 
-        cuartos = [0, 15, 30, 45]
+        # Diseñamos dos tarjetas bonitas usando st.columns
+        col_citas, col_dispo = st.columns(2)
+        with col_citas:
+            st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy}   cita(s)")
+        with col_dispo:
+            st.metric(label="✅ Espacios disponibles (15 min)", value=f"{bloques_disponibles} de {total_bloques_dia}")
+            
+        st.write("") # Espacio estético
         
-        # 1. Declaramos el CSS (Cambiado a 4 columnas simétricas)
+        # 1. Declaramos el CSS (4 columnas simétricas)
         css_grid = """
         <style>
         .grid-container {
@@ -253,10 +286,10 @@ if menu == "Agenda Diaria Sillon":
         """
         st.markdown(css_grid, unsafe_allow_html=True)
         
-        # 2. Empezamos la estructura SIN la fila de encabezados antiguos (:00, :15, etc.)
+        # 2. Empezamos la estructura de la grilla HTML
         html_grid = "<div class='grid-container'>"
         
-        # 3. Ciclo para generar las filas de horas (Removida también la etiqueta lateral de hora)
+        # 3. Ciclo para generar las filas de horas
         for hora in horas_base:
             for cuarto in cuartos:
                 h = time(hora, cuarto)
@@ -289,7 +322,7 @@ if menu == "Agenda Diaria Sillon":
                     
         html_grid += "</div>"
         
-        # 4. Renderizado final
+        # 4. Renderizado final de la cuadrícula
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
 
