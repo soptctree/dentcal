@@ -205,36 +205,36 @@ if menu == "Agenda Diaria Sillon":
         if not df_todas.empty:
             df_activas = df_todas[df_todas['estado'] != 'Cancelada']
         
-        # --- MAPA DE DISPONIBILIDAD HORARIA RESPONSIVO (COMPATIBLE CON MÓVIL) ---
+        # --- MAPA DE DISPONIBILIDAD HORARIA RESPONSIVO ---
         st.write("### 🕒 Ocupación del Sillón Dental")
         
-        # Agrupamos las horas por bloques enteros para armar las filas (Desde las 07 hasta las 17)
         horas_base = range(7, 18) 
         cuartos = [0, 15, 30, 45]
         
-        # Estilos CSS personalizados actualizados para soportar texto interno de rangos
+        # 1. Declaramos el CSS para darle forma de tabla/grilla
         css_grid = """
         <style>
         .grid-container {
-            display: grid;
-            grid-template-columns: 80px repeat(4, 1fr);
-            gap: 6px;
+            display: grid !important;
+            grid-template-columns: 90px repeat(4, minmax(100px, 1fr)) !important;
+            gap: 8px !important;
             font-family: Arial, sans-serif;
-            margin-bottom: 20px;
+            margin-bottom: 25px;
+            width: 100%;
         }
         .grid-header {
             background-color: #f0f2f6;
             color: #31333F;
-            padding: 6px;
+            padding: 8px;
             text-align: center;
             font-weight: bold;
-            font-size: 13px;
+            font-size: 14px;
             border-radius: 4px;
         }
         .grid-time-label {
             background-color: #e1e4eb;
             color: #31333F;
-            padding: 8px;
+            padding: 10px;
             font-weight: bold;
             text-align: center;
             font-size: 14px;
@@ -247,9 +247,9 @@ if menu == "Agenda Diaria Sillon":
             background-color: #DFF2BF;
             color: #4F8A10;
             border: 1px solid #4F8A10;
-            padding: 8px;
+            padding: 10px;
             text-align: center;
-            font-size: 11px;
+            font-size: 12px;
             border-radius: 4px;
             font-weight: 500;
         }
@@ -257,23 +257,25 @@ if menu == "Agenda Diaria Sillon":
             background-color: #FFD2D2;
             color: #D8000C;
             border: 1px solid #D8000C;
-            padding: 8px;
+            padding: 10px;
             text-align: center;
             font-weight: bold;
-            font-size: 11px;
+            font-size: 12px;
             border-radius: 4px;
         }
         .slot-range {
             display: block;
-            font-size: 10px;
+            font-size: 11px;
             opacity: 0.8;
-            margin-bottom: 2px;
+            margin-bottom: 3px;
+            font-weight: normal;
         }
         </style>
         """
+        # Renderizamos el CSS de inmediato para que afecte a la página
         st.markdown(css_grid, unsafe_allow_html=True)
         
-        # Iniciamos la estructura de la grilla HTML
+        # 2. Empezamos a construir el contenedor de la grilla HTML
         html_grid = """
         <div class='grid-container'>
             <div class='grid-header'>Hora</div>
@@ -283,22 +285,19 @@ if menu == "Agenda Diaria Sillon":
             <div class='grid-header'>:45</div>
         """
         
-        # Recorremos cada hora entera para construir fila por fila
+        # 3. Ciclo para generar las filas de horas
         for hora in horas_base:
-            # Añadimos la etiqueta de la hora al inicio de la fila (Ej: "08:00")
             html_grid += f"<div class='grid-time-label'>{hora:02d}:00</div>"
             
             for cuarto in cuartos:
                 h = time(hora, cuarto)
                 
-                # Calculamos el rango exacto de este micro-bloque de 15 minutos en formato time
                 dt_bloque_inicio = datetime.combine(datetime.min, h)
                 dt_bloque_fin = dt_bloque_inicio + timedelta(minutes=15)
                 
                 bloque_inicio_time = dt_bloque_inicio.time()
                 bloque_fin_time = dt_bloque_fin.time()
                 
-                # Texto del rango para mostrar dentro del botón/celda
                 rango_texto = f"{bloque_inicio_time.strftime('%H:%M')}-{bloque_fin_time.strftime('%H:%M')}"
                 
                 ocupado = False
@@ -309,16 +308,12 @@ if menu == "Agenda Diaria Sillon":
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
-                        # CORRECCIÓN DE LÓGICA: Intersección de rangos real
-                        # El bloque está ocupado si empieza antes del fin de la cita Y termina después del inicio de la cita
                         if bloque_inicio_time < fin_cita and bloque_fin_time > inicio_cita:
                             ocupado = True
                             paciente_ocupando = r['nombre']
                             break
                 
-                # Generamos el casillero correspondiente basado en su estado
                 if ocupado:
-                    # Agregamos el nombre del paciente en el atributo title para que se vea flotante al pasar el mouse
                     html_grid += f"""
                     <div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'>
                         <span class='slot-range'>❌ {rango_texto}</span> Ocupado
@@ -327,13 +322,13 @@ if menu == "Agenda Diaria Sillon":
                 else:
                     html_grid += f"""
                     <div class='grid-slot-libre'>
-                        <span class='slot-range'>      {rango_texto}</span> Libre
+                        <span class='slot-range'>{rango_texto}</span> Libre
                     </div>
                     """
                     
         html_grid += "</div>"
         
-        # Renderizamos la grilla completa de un solo golpe
+        # 4. Renderizado final del HTML unificado (OBLIGATORIO unsafe_allow_html=True)
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
         
