@@ -211,45 +211,24 @@ if menu == "Agenda Diaria Sillon":
         horas_base = range(7, 18) 
         cuartos = [0, 15, 30, 45]
         
-        # 1. Declaramos el CSS limpio para la grilla
+        # 1. Declaramos el CSS (Cambiado a 4 columnas simétricas)
         css_grid = """
         <style>
         .grid-container {
             display: grid !important;
-            grid-template-columns: 90px repeat(4, minmax(100px, 1fr)) !important;
+            grid-template-columns: repeat(4, minmax(100px, 1fr)) !important;
             gap: 8px !important;
             font-family: Arial, sans-serif;
             margin-bottom: 25px;
             width: 100%;
         }
-        .grid-header {
-            background-color: #f0f2f6;
-            color: #31333F;
-            padding: 8px;
-            text-align: center;
-            font-weight: bold;
-            font-size: 14px;
-            border-radius: 4px;
-        }
-        .grid-time-label {
-            background-color: #e1e4eb;
-            color: #31333F;
-            padding: 10px;
-            font-weight: bold;
-            text-align: center;
-            font-size: 14px;
-            border-radius: 4px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
         .grid-slot-libre {
             background-color: #DFF2BF;
             color: #4F8A10;
             border: 1px solid #4F8A10;
-            padding: 10px;
+            padding: 12px 10px;
             text-align: center;
-            font-size: 12px;
+            font-size: 13px;
             border-radius: 4px;
             font-weight: 500;
         }
@@ -257,10 +236,10 @@ if menu == "Agenda Diaria Sillon":
             background-color: #FFD2D2;
             color: #D8000C;
             border: 1px solid #D8000C;
-            padding: 10px;
+            padding: 12px 10px;
             text-align: center;
             font-weight: bold;
-            font-size: 12px;
+            font-size: 13px;
             border-radius: 4px;
         }
         .slot-range {
@@ -274,13 +253,11 @@ if menu == "Agenda Diaria Sillon":
         """
         st.markdown(css_grid, unsafe_allow_html=True)
         
-        # 2. Empezamos la estructura de la grilla HTML en una sola línea para evitar fallos de Markdown
-        html_grid = "<div class='grid-container'><div class='grid-header'>Hora</div><div class='grid-header'>:00</div><div class='grid-header'>:15</div><div class='grid-header'>:30</div><div class='grid-header'>:45</div>"
+        # 2. Empezamos la estructura SIN la fila de encabezados antiguos (:00, :15, etc.)
+        html_grid = "<div class='grid-container'>"
         
-        # 3. Ciclo para generar las filas de horas
+        # 3. Ciclo para generar las filas de horas (Removida también la etiqueta lateral de hora)
         for hora in horas_base:
-            html_grid += f"<div class='grid-time-label'>{hora:02d}:00</div>"
-            
             for cuarto in cuartos:
                 h = time(hora, cuarto)
                 
@@ -305,15 +282,14 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
-                # CORRECCIÓN AQUÍ: Eliminados los saltos de línea e identaciones internas del string HTML
                 if ocupado:
-                    html_grid += f"<div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {rango_texto}</span> Ocupado</div>"
+                    html_grid += f"<div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div>"
                 else:
-                    html_grid += f"<div class='grid-slot-libre'><span class='slot-range'>{rango_texto}</span> Libre</div>"
+                    html_grid += f"<div class='grid-slot-libre'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
                     
         html_grid += "</div>"
         
-        # 4. Renderizado final sin problemas de interpretación de texto plano
+        # 4. Renderizado final
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
 
