@@ -208,43 +208,19 @@ if menu == "Agenda Diaria Sillon":
         # --- 🕒 LÓGICA DE OCUPACIÓN Y ESTADÍSTICAS ---
         horas_base = range(7, 18)  # De 7 AM a 5 PM
         cuartos = [0, 15, 30, 45]
-        total_bloques_dia = len(horas_base) * len(cuartos)  # 11 horas * 4 = 44 bloques
         
-        # Contamos cuántas citas reales (únicas) hay hoy y cuántos bloques están ocupados
+        # Contamos cuántas citas reales (únicas) hay hoy
         total_citas_hoy = len(df_activas) if not df_activas.empty else 0
-        bloques_ocupados = 0
-        
-        # Primero hacemos un conteo previo de bloques ocupados para las métricas
-        for hora in horas_base:
-            for cuarto in cuartos:
-                h = time(hora, cuarto)
-                bloque_inicio_time = datetime.combine(datetime.min, h).time()
-                bloque_fin_time = (datetime.combine(datetime.min, h) + timedelta(minutes=15)).time()
-                
-                if not df_activas.empty:
-                    for _, r in df_activas.iterrows():
-                        inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-                        fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-                        
-                        if bloque_inicio_time < fin_cita and bloque_fin_time > inicio_cita:
-                            bloques_ocupados += 1
-                            break
-                            
-        bloques_disponibles = total_bloques_dia - bloques_ocupados
 
-        # --- TITULO Y TARJETAS DE RESUMEN (MÉTRICAS) ---
+        # --- TITULO Y RESUMEN SIMPLE ---
         st.write("### 🕒 Ocupación del Sillón Dental")
         
-        # Diseñamos dos tarjetas bonitas usando st.columns
-        col_citas, col_dispo = st.columns(2)
-        with col_citas:
-            st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy}   cita(s)")
-        with col_dispo:
-            st.metric(label="✅ Espacios disponibles (15 min)", value=f"{bloques_disponibles} de {total_bloques_dia}")
+        # Una sola tarjeta directa y fácil de entender
+        st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy} paciente(s)")
             
         st.write("") # Espacio estético
         
-        # 1. Declaramos el CSS (4 columnas simétricas)
+        # 1. Declaramos el CSS (Agregamos efectos visuales para el puntero)
         css_grid = """
         <style>
         .grid-container {
@@ -264,6 +240,11 @@ if menu == "Agenda Diaria Sillon":
             font-size: 13px;
             border-radius: 4px;
             font-weight: 500;
+            transition: transform 0.1s ease;
+        }
+        .grid-slot-libre:hover {
+            transform: scale(1.02);
+            cursor: pointer;
         }
         .grid-slot-ocupado {
             background-color: #FFD2D2;
@@ -274,6 +255,13 @@ if menu == "Agenda Diaria Sillon":
             font-weight: bold;
             font-size: 13px;
             border-radius: 4px;
+            transition: transform 0.1s ease;
+        }
+        /* Cambio de color y cursor al pasar el mouse por encima de un bloque ocupado */
+        .grid-slot-ocupado:hover {
+            background-color: #ffb6b6;
+            transform: scale(1.02);
+            cursor: help; /* Muestra un signo de interrogación indicando que hay información */
         }
         .slot-range {
             display: block;
@@ -315,10 +303,11 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
+                # Al pasar el mouse por el bloque ocupado, el atributo 'title' despliega el nombre del paciente
                 if ocupado:
                     html_grid += f"<div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div>"
                 else:
-                    html_grid += f"<div class='grid-slot-libre'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
+                    html_grid += f"<div class='grid-slot-libre' title='Espacio Disponible'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
                     
         html_grid += "</div>"
         
