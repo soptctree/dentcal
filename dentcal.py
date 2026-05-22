@@ -211,7 +211,7 @@ if menu == "Agenda Diaria Sillon":
         horas_base = range(7, 18) 
         cuartos = [0, 15, 30, 45]
         
-        # 1. Declaramos el CSS para darle forma de tabla/grilla
+        # 1. Declaramos el CSS limpio para la grilla
         css_grid = """
         <style>
         .grid-container {
@@ -272,18 +272,10 @@ if menu == "Agenda Diaria Sillon":
         }
         </style>
         """
-        # Renderizamos el CSS de inmediato para que afecte a la página
         st.markdown(css_grid, unsafe_allow_html=True)
         
-        # 2. Empezamos a construir el contenedor de la grilla HTML
-        html_grid = """
-        <div class='grid-container'>
-            <div class='grid-header'>Hora</div>
-            <div class='grid-header'>:00</div>
-            <div class='grid-header'>:15</div>
-            <div class='grid-header'>:30</div>
-            <div class='grid-header'>:45</div>
-        """
+        # 2. Empezamos la estructura de la grilla HTML en una sola línea para evitar fallos de Markdown
+        html_grid = "<div class='grid-container'><div class='grid-header'>Hora</div><div class='grid-header'>:00</div><div class='grid-header'>:15</div><div class='grid-header'>:30</div><div class='grid-header'>:45</div>"
         
         # 3. Ciclo para generar las filas de horas
         for hora in horas_base:
@@ -313,26 +305,17 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
+                # CORRECCIÓN AQUÍ: Eliminados los saltos de línea e identaciones internas del string HTML
                 if ocupado:
-                    html_grid += f"""
-                    <div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'>
-                        <span class='slot-range'>❌ {rango_texto}</span> Ocupado
-                    </div>
-                    """
+                    html_grid += f"<div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {rango_texto}</span> Ocupado</div>"
                 else:
-                    html_grid += f"""
-                    <div class='grid-slot-libre'>
-                        <span class='slot-range'>{rango_texto}</span> Libre
-                    </div>
-                    """
+                    html_grid += f"<div class='grid-slot-libre'><span class='slot-range'>{rango_texto}</span> Libre</div>"
                     
         html_grid += "</div>"
         
-        # 4. Renderizado final del HTML unificado (OBLIGATORIO unsafe_allow_html=True)
+        # 4. Renderizado final sin problemas de interpretación de texto plano
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
-        
-        # --- NOTA: SE ELIMINÓ LA SECCIÓN DUPLICADA DE "RANGOS OCUPADOS" ---
 
         # --- 3. DETALLE Y ASISTENCIA ---
         st.write("### 📝 Control de Asistencia")
