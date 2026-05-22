@@ -431,7 +431,8 @@ elif menu == "Pacientes y Expedientes":
                         
                         st.success(f"🎉 ¡Paciente '{n}' registrado con éxito!")
                         
-                        time.sleep(1) # Asegúrate de que use 'time.sleep' o tu alias 't_sleep'
+                        # --- CAMBIO AQUÍ PARA EVITAR EL ERROR ---
+                        st.toast("Actualizando lista de pacientes...", icon="🔄")
                         st.rerun()
                         
                     except Exception as e:
