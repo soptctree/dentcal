@@ -148,6 +148,77 @@ def verificar_disponibilidad(fecha, hora_inicio, hora_fin):
 # --- NAVEGACIÓN PRINCIPAL Y SEGURIDAD ---
 st.title("🦷 DentCal: Gestión Odontológica")
 
+# =========================================================
+# 🏥 COMPONENTE ESTÁNDAR: IDENTIDAD DE LA CLÍNICA
+# =========================================================
+NOMBRE_CLINICA = "Clínica Dental 'Tu Sonrisa'"
+SLOGAN_CLINICA = "Cuidando tu salud bucal con excelencia"
+TELEFONO_CLINICA = "+505 8888-8888"
+HORARIO_CLINICA = "Lun - Sáb: 7:00 AM - 5:00 PM"
+
+URL_LOGO = "https://cdn-icons-png.flaticon.com/512/3467/3467749.png"
+
+css_clinica = """
+<style>
+.sidebar-logo-container {
+    text-align: center;
+    padding: 15px 10px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    border: 1px solid #e9ecef;
+}
+.sidebar-logo-img {
+    max-width: 110px;
+    height: auto;
+    border-radius: 50%;
+    margin-bottom: 10px;
+    object-fit: cover;
+    background-color: #ffffff;
+    box-shadow: 0px 2px 4px rgba(0,0,0,0.05);
+}
+.sidebar-clinica-name {
+    font-size: 16px !important;
+    font-weight: bold !important;
+    color: #1E3A8A !important;
+    margin-bottom: 4px !important;
+    line-height: 1.2;
+}
+.sidebar-clinica-slogan {
+    font-size: 11px !important;
+    color: #6B7280 !important;
+    font-style: italic !important;
+    margin-bottom: 8px !important;
+    line-height: 1.3;
+}
+.sidebar-clinica-info {
+    font-size: 11px !important;
+    color: #374151 !important;
+    margin-bottom: 2px !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+}
+</style>
+"""
+st.sidebar.markdown(css_clinica, unsafe_allow_html=True)
+
+html_clinica = f"""
+<div class="sidebar-logo-container">
+    <img src="{URL_LOGO}" class="sidebar-logo-img" alt="Logo">
+    <div class="sidebar-clinica-name">{NOMBRE_CLINICA}</div>
+    <div class="sidebar-clinica-slogan">{SLOGAN_CLINICA}</div>
+    <hr style="margin: 8px 0; border: 0; border-top: 1px solid #e9ecef;">
+    <div class="sidebar-clinica-info">📞 {TELEFONO_CLINICA}</div>
+    <div class="sidebar-clinica-info">🕒 {HORARIO_CLINICA}</div>
+</div>
+"""
+st.sidebar.markdown(html_clinica, unsafe_allow_html=True)
+# =========================================================
+
+
+
 # 1. Recuperamos el rol del usuario desde el st.session_state
 rol_actual = st.session_state.get('rol', 'Asistente')
 
