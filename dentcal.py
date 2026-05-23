@@ -220,8 +220,17 @@ if menu == "Agenda Diaria Sillon":
             
         st.write("") # Espacio estético
         
-        # 1. Declaramos el CSS (Soporte para Hover en PC y cursor de interacción)
-        css_grid = """
+        # 1. Declaramos el CSS y una función JavaScript limpia (Evita problemas de comillas en celulares)
+        css_y_js = """
+        <script>
+        function mostrarCita(hora, paciente) {
+            if (paciente) {
+                alert("⏰ Hora: " + hora + "\\n👤 Paciente: " + paciente);
+            } else {
+                alert("🟢 Hora: " + hora + "\\n✨ Espacio Disponible");
+            }
+        }
+        </script>
         <style>
         .grid-container {
             display: grid !important;
@@ -271,7 +280,7 @@ if menu == "Agenda Diaria Sillon":
         }
         </style>
         """
-        st.markdown(css_grid, unsafe_allow_html=True)
+        st.markdown(css_y_js, unsafe_allow_html=True)
         
         # 2. Empezamos la estructura de la grilla HTML
         html_grid = "<div class='grid-container'>"
@@ -302,11 +311,14 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
-                # SOLUCIÓN COMPATIBLE CON MÓVILES: El onclick va directo en el div, sin usar links <a> engañosos
+                # Al usar comillas simples fijas y pasar los datos limpitos a la función script, el celular no se pierde
+                hora_str = bloque_inicio_time.strftime('%H:%M')
                 if ocupado:
-                    html_grid += f"<div class='grid-slot-ocupado' onclick=\"alert('Hora: {bloque_inicio_time.strftime('%H:%M')}\\nPaciente: {paciente_ocupando}');\" title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div>"
+                    # Reemplazamos posibles comillas en el nombre para que no rompan la función
+                    p_seguro = paciente_ocupando.replace("'", "\\'")
+                    html_grid += f"<div class='grid-slot-ocupado' onclick=\"mostrarCita('{hora_str}', '{p_seguro}');\" title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {hora_str}</span> Ocupado</div>"
                 else:
-                    html_grid += f"<div class='grid-slot-libre' onclick=\"alert('Espacio Libre de las {bloque_inicio_time.strftime('%H:%M')}');\" title='Espacio Disponible'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
+                    html_grid += f"<div class='grid-slot-libre' onclick=\"mostrarCita('{hora_str}', '');\" title='Espacio Disponible'><span class='slot-range'>{hora_str}</span> Libre</div>"
                     
         html_grid += "</div>"
         
