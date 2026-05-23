@@ -4,6 +4,11 @@ from datetime import datetime, time, timedelta
 import time as t_sleep
 import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
+st.set_page_config(
+    page_title="DentCal: Gestión Odontológica",
+    page_icon="🦷",  # <--- AQUÍ COLOCAS EL DIENTE
+    layout="wide"
+)
 
 def conectar_db():
     return pymysql.connect(
