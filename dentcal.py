@@ -289,7 +289,7 @@ if menu == "Agenda Diaria Sillon":
         total_citas_hoy = len(df_activas) if not df_activas.empty else 0
 
         # --- MAPA DE DISPONIBILIDAD ENCAPSULADO POR HORA ---
-        st.write("### 🕒 Ocupación del Sillón Dental (Por Hora)")
+        st.write("### 🕒 Ocupación Diaria")
         
         # Métrica de control rápida
         st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy} paciente(s)")
