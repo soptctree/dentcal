@@ -231,7 +231,6 @@ if menu == "Agenda Diaria Sillon":
             margin-bottom: 25px;
             width: 100%;
         }
-        /* Estilo base para los enlaces/bloques */
         .grid-link {
             text-decoration: none !important;
             color: inherit !important;
@@ -306,23 +305,11 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
-                # CORRECCIÓN PARA CELULARES: Envolvemos los bloques en etiquetas <a> con javascript interactivo
+                # CORRECCIÓN ABSOLUTA: Todo concatenado en una sola línea plana de texto para blindar a Streamlit
                 if ocupado:
-                    html_grid += f"""
-                    <a href="javascript:void(0);" onclick="alert('Hora: {bloque_inicio_time.strftime('%H:%M')}\\nPaciente: {paciente_ocupando}');" class="grid-link" title="Paciente: {paciente_ocupando}">
-                        <div class='grid-slot-ocupado'>
-                            <span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado
-                        </div>
-                    </a>
-                    """
+                    html_grid += f"<a href='javascript:void(0);' onclick=\"alert('Hora: {bloque_inicio_time.strftime('%H:%M')}\\nPaciente: {paciente_ocupando}');\" class='grid-link' title='Paciente: {paciente_ocupando}'><div class='grid-slot-ocupado'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div></a>"
                 else:
-                    html_grid += f"""
-                    <a href="javascript:void(0);" onclick="alert('Espacio Libre de las {bloque_inicio_time.strftime('%H:%M')}');" class="grid-link" title="Espacio Disponible">
-                        <div class='grid-slot-libre'>
-                            <span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre
-                        </div>
-                    </a>
-                    """
+                    html_grid += f"<a href='javascript:void(0);' onclick=\"alert('Espacio Libre de las {bloque_inicio_time.strftime('%H:%M')}');\" class='grid-link' title='Espacio Disponible'><div class='grid-slot-libre'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div></a>"
                     
         html_grid += "</div>"
         
