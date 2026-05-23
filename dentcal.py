@@ -338,9 +338,8 @@ if menu == "Agenda Diaria Sillon":
 
         html_grid = "<div class='hour-container'>"
 
-        # 2. Iteramos únicamente por hora entera (Ej: de 7 a 17)
+        # 2. Iteramos únicamente por hora entera
         for hora in horas_base:
-            # Contamos cuántos de los 4 cuartos de esta hora están ocupados
             cuartos_ocupados = 0
             ultimo_minuto_ocupado = 0
             
@@ -348,7 +347,6 @@ if menu == "Agenda Diaria Sillon":
                 bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
                 bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
                 
-                # Verificar si este cuarto específico de hora está pisado por una cita
                 if not df_activas.empty:
                     for _, r in df_activas.iterrows():
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
@@ -359,35 +357,28 @@ if menu == "Agenda Diaria Sillon":
                             ultimo_minuto_ocupado = cuarto + 15
                             break
             
-            # 3. Calculamos el porcentaje de relleno de la barra de acuerdo a tu lógica
             porcentaje_rojo = cuartos_ocupados * 25
             
-            # Generamos el texto indicador de arriba
             if cuartos_ocupados == 4:
                 texto_arriba = "Ocupado"
             elif cuartos_ocupados > 0:
-                texto_arriba = f"Ocupado hasta las {hora}:{ultimo_minuto_ocupado:02d}" # Ej: 9:30
+                texto_arriba = f"Hasta las {hora}:{ultimo_minuto_ocupado:02d}"
             else:
                 texto_arriba = "Disponible"
             
-            # 4. Magia de CSS: Creamos el fondo dividido (Rojo para ocupado, Verde para libre)
             if porcentaje_rojo == 100:
                 estilo_fondo = "background-color: #FFD2D2; border-color: #D8000C; color: #D8000C;"
             elif porcentaje_rojo == 0:
                 estilo_fondo = "background-color: #DFF2BF; border-color: #4F8A10; color: #4F8A10;"
             else:
-                # Degradado lineal puro sin difuminado (corte limpio en el porcentaje)
                 estilo_fondo = f"background: linear-gradient(to right, #FFD2D2 {porcentaje_rojo}%, #DFF2BF {porcentaje_rojo}%); border-color: #cca4a4;"
 
-            # Renderizamos la tarjeta de la hora entera
-            html_grid += f"""
-            <div class='hour-card' style='{estilo_fondo}'>
-                <span class='top-indicator'>📋 {texto_arriba}</span>
-                <span class='time-label'>{hora:02d}:00</span>
-            </div>
-            """
+            # LINEA TOTALMENTE PLANA SIN SALTOS DE LINEA INVISIBLES
+            html_grid += f"<div class='hour-card' style='{estilo_fondo}'><span class='top-indicator'>📋 {texto_arriba}</span><span class='time-label'>{hora:02d}:00</span></div>"
 
         html_grid += "</div>"
+        
+        # 4. Renderizado final libre de errores
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
 
