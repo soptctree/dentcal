@@ -220,7 +220,7 @@ if menu == "Agenda Diaria Sillon":
             
         st.write("") # Espacio estético
         
-        # 1. Declaramos el CSS (Soporte para Hover en PC y Clicks en Celular)
+        # 1. Declaramos el CSS (Soporte para Hover en PC y cursor de interacción)
         css_grid = """
         <style>
         .grid-container {
@@ -230,11 +230,6 @@ if menu == "Agenda Diaria Sillon":
             font-family: Arial, sans-serif;
             margin-bottom: 25px;
             width: 100%;
-        }
-        .grid-link {
-            text-decoration: none !important;
-            color: inherit !important;
-            display: block;
         }
         .grid-slot-libre {
             background-color: #DFF2BF;
@@ -246,6 +241,7 @@ if menu == "Agenda Diaria Sillon":
             border-radius: 4px;
             font-weight: 500;
             transition: transform 0.1s ease;
+            cursor: pointer;
         }
         .grid-slot-libre:hover {
             transform: scale(1.02);
@@ -260,6 +256,7 @@ if menu == "Agenda Diaria Sillon":
             font-size: 12px;
             border-radius: 4px;
             transition: transform 0.1s ease;
+            cursor: pointer;
         }
         .grid-slot-ocupado:hover {
             background-color: #ffb6b6;
@@ -305,11 +302,11 @@ if menu == "Agenda Diaria Sillon":
                             paciente_ocupando = r['nombre']
                             break
                 
-                # CORRECCIÓN ABSOLUTA: Todo concatenado en una sola línea plana de texto para blindar a Streamlit
+                # SOLUCIÓN COMPATIBLE CON MÓVILES: El onclick va directo en el div, sin usar links <a> engañosos
                 if ocupado:
-                    html_grid += f"<a href='javascript:void(0);' onclick=\"alert('Hora: {bloque_inicio_time.strftime('%H:%M')}\\nPaciente: {paciente_ocupando}');\" class='grid-link' title='Paciente: {paciente_ocupando}'><div class='grid-slot-ocupado'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div></a>"
+                    html_grid += f"<div class='grid-slot-ocupado' onclick=\"alert('Hora: {bloque_inicio_time.strftime('%H:%M')}\\nPaciente: {paciente_ocupando}');\" title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div>"
                 else:
-                    html_grid += f"<a href='javascript:void(0);' onclick=\"alert('Espacio Libre de las {bloque_inicio_time.strftime('%H:%M')}');\" class='grid-link' title='Espacio Disponible'><div class='grid-slot-libre'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div></a>"
+                    html_grid += f"<div class='grid-slot-libre' onclick=\"alert('Espacio Libre de las {bloque_inicio_time.strftime('%H:%M')}');\" title='Espacio Disponible'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
                     
         html_grid += "</div>"
         
