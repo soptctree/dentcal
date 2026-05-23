@@ -288,106 +288,106 @@ if menu == "Agenda Diaria Sillon":
         # Contamos cuántas citas reales (únicas) hay hoy
         total_citas_hoy = len(df_activas) if not df_activas.empty else 0
 
-        # --- TITULO Y RESUMEN SIMPLE ---
-        st.write("### 🕒 Ocupación del Sillón Dental")
+        # --- MAPA DE DISPONIBILIDAD ENCAPSULADO POR HORA ---
+        st.write("### 🕒 Ocupación del Sillón Dental (Por Hora)")
         
-        # Una sola tarjeta directa y fácil de entender
+        # Métrica de control rápida
         st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy} paciente(s)")
-            
-        st.write("") # Espacio estético
-        
-        # 1. Declaramos el CSS (Agregamos efectos visuales para el puntero)
-        css_grid = """
+        st.write("") 
+
+        # 1. CSS dinámico para la nueva cuadrícula de horas completas
+        css_bloques = """
         <style>
-        .grid-container {
+        .hour-container {
             display: grid !important;
-            grid-template-columns: repeat(4, minmax(100px, 1fr)) !important;
-            gap: 8px !important;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+            gap: 12px !important;
             font-family: Arial, sans-serif;
             margin-bottom: 25px;
             width: 100%;
         }
-        .grid-slot-libre {
-            background-color: #DFF2BF;
-            color: #4F8A10;
-            border: 1px solid #4F8A10;
-            padding: 12px 10px;
+        .hour-card {
+            border: 1px solid #b5b5b5;
+            padding: 14px 8px;
             text-align: center;
-            font-size: 13px;
-            border-radius: 4px;
-            font-weight: 500;
-            transition: transform 0.1s ease;
-        }
-        .grid-slot-libre:hover {
-            transform: scale(1.02);
-            cursor: pointer;
-        }
-        .grid-slot-ocupado {
-            background-color: #FFD2D2;
-            color: #D8000C;
-            border: 1px solid #D8000C;
-            padding: 12px 10px;
-            text-align: center;
+            border-radius: 6px;
             font-weight: bold;
-            font-size: 13px;
-            border-radius: 4px;
-            transition: transform 0.1s ease;
+            font-size: 14px;
+            box-shadow: 0px 2px 4px rgba(0,0,0,0.05);
+            position: relative;
+            color: #222222;
         }
-        /* Cambio de color y cursor al pasar el mouse por encima de un bloque ocupado */
-        .grid-slot-ocupado:hover {
-            background-color: #ffb6b6;
-            transform: scale(1.02);
-            cursor: help; /* Muestra un signo de interrogación indicando que hay información */
-        }
-        .slot-range {
+        .top-indicator {
             display: block;
             font-size: 11px;
-            opacity: 0.8;
-            margin-bottom: 3px;
             font-weight: normal;
+            color: #444444;
+            margin-bottom: 4px;
+            background: rgba(255,255,255,0.7);
+            border-radius: 3px;
+            padding: 1px 2px;
+        }
+        .time-label {
+            font-size: 16px;
+            display: block;
+            margin-top: 2px;
         }
         </style>
         """
-        st.markdown(css_grid, unsafe_allow_html=True)
-        
-        # 2. Empezamos la estructura de la grilla HTML
-        html_grid = "<div class='grid-container'>"
-        
-        # 3. Ciclo para generar las filas de horas
+        st.markdown(css_bloques, unsafe_allow_html=True)
+
+        html_grid = "<div class='hour-container'>"
+
+        # 2. Iteramos únicamente por hora entera (Ej: de 7 a 17)
         for hora in horas_base:
-            for cuarto in cuartos:
-                h = time(hora, cuarto)
+            # Contamos cuántos de los 4 cuartos de esta hora están ocupados
+            cuartos_ocupados = 0
+            ultimo_minuto_ocupado = 0
+            
+            for cuarto in [0, 15, 30, 45]:
+                bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
+                bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
                 
-                dt_bloque_inicio = datetime.combine(datetime.min, h)
-                dt_bloque_fin = dt_bloque_inicio + timedelta(minutes=15)
-                
-                bloque_inicio_time = dt_bloque_inicio.time()
-                bloque_fin_time = dt_bloque_fin.time()
-                
-                rango_texto = f"{bloque_inicio_time.strftime('%H:%M')}-{bloque_fin_time.strftime('%H:%M')}"
-                
-                ocupado = False
-                paciente_ocupando = ""
-                
+                # Verificar si este cuarto específico de hora está pisado por una cita
                 if not df_activas.empty:
                     for _, r in df_activas.iterrows():
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
-                        if bloque_inicio_time < fin_cita and bloque_fin_time > inicio_cita:
-                            ocupado = True
-                            paciente_ocupando = r['nombre']
+                        if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
+                            cuartos_ocupados += 1
+                            ultimo_minuto_ocupado = cuarto + 15
                             break
-                
-                # Al pasar el mouse por el bloque ocupado, el atributo 'title' despliega el nombre del paciente
-                if ocupado:
-                    html_grid += f"<div class='grid-slot-ocupado' title='Paciente: {paciente_ocupando}'><span class='slot-range'>❌ {bloque_inicio_time.strftime('%H:%M')}</span> Ocupado</div>"
-                else:
-                    html_grid += f"<div class='grid-slot-libre' title='Espacio Disponible'><span class='slot-range'>{bloque_inicio_time.strftime('%H:%M')}</span> Libre</div>"
-                    
+            
+            # 3. Calculamos el porcentaje de relleno de la barra de acuerdo a tu lógica
+            porcentaje_rojo = cuartos_ocupados * 25
+            
+            # Generamos el texto indicador de arriba
+            if cuartos_ocupados == 4:
+                texto_arriba = "Ocupado"
+            elif cuartos_ocupados > 0:
+                texto_arriba = f"Ocupado hasta las {hora}:{ultimo_minuto_ocupado:02d}" # Ej: 9:30
+            else:
+                texto_arriba = "Disponible"
+            
+            # 4. Magia de CSS: Creamos el fondo dividido (Rojo para ocupado, Verde para libre)
+            if porcentaje_rojo == 100:
+                estilo_fondo = "background-color: #FFD2D2; border-color: #D8000C; color: #D8000C;"
+            elif porcentaje_rojo == 0:
+                estilo_fondo = "background-color: #DFF2BF; border-color: #4F8A10; color: #4F8A10;"
+            else:
+                # Degradado lineal puro sin difuminado (corte limpio en el porcentaje)
+                estilo_fondo = f"background: linear-gradient(to right, #FFD2D2 {porcentaje_rojo}%, #DFF2BF {porcentaje_rojo}%); border-color: #cca4a4;"
+
+            # Renderizamos la tarjeta de la hora entera
+            html_grid += f"""
+            <div class='hour-card' style='{estilo_fondo}'>
+                <span class='top-indicator'>📋 {texto_arriba}</span>
+                <span class='time-label'>{hora:02d}:00</span>
+            </div>
+            """
+
         html_grid += "</div>"
-        
-        # 4. Renderizado final de la cuadrícula
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
 
