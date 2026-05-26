@@ -400,40 +400,69 @@ if menu == "Agenda Diaria Sillon":
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
         #############################################
-        # --- SECCIÓN DE ANALÍTICA MENSAL ---
+        # --- SECCIÓN DE ANALÍTICA AVANZADA (MENSUAL Y SEMANAL) ---
         st.write("---")
-        st.write("### 📈 Análisis de Demanda Mensual")
+        st.write("### 📈 Análisis y Reportes de Demanda")
         
-        # 1. Filtro de Mes y Año para la consulta
-        col_mes, col_anio = st.columns(2)
-        with col_mes:
-            mes_seleccionado = st.selectbox(
-                "Seleccione el Mes:",
-                options=range(1, 13),
-                format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-                                       "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x-1],
-                index=datetime.now().month - 1
-            )
-        with col_anio:
-            anio_seleccionado = st.selectbox(
-                "Seleccione el Año:",
-                options=[datetime.now().year - 1, datetime.now().year, datetime.now().year + 1],
-                index=1
-            )
+        # 1. Selector principal del tipo de reporte
+        tipo_reporte = st.radio(
+            "Seleccione el tipo de visualización:",
+            options=["Por Mes Cerrado", "Rango de Fechas Libre (Semanal / Entre Meses)"],
+            horizontal=True
+        )
+        
+        # Inicializamos las variables de control de fechas
+        fecha_inicio_query = None
+        fecha_fin_query = None
 
-        # 2. Query para extraer TODAS las citas de ese mes específico desde TiDB
-        query_mensual = """
+        if tipo_reporte == "Por Mes Cerrado":
+            col_mes, col_anio = st.columns(2)
+            with col_mes:
+                mes_seleccionado = st.selectbox(
+                    "Seleccione el Mes:",
+                    options=range(1, 13),
+                    format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                                           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x-1],
+                    index=datetime.now().month - 1
+                )
+            with col_anio:
+                anio_seleccionado = st.selectbox(
+                    "Seleccione el Año:",
+                    options=[datetime.now().year - 1, datetime.now().year, datetime.now().year + 1],
+                    index=1
+                )
+            # Calculamos el primer y último día de ese mes para unificar la consulta SQL
+            fecha_inicio_query = f"{anio_seleccionado}-{mes_seleccionado:02d}-01"
+            # Usamos una matemática simple para el fin de mes
+            if mes_seleccionado == 12:
+                fecha_fin_query = f"{anio_seleccionado}-12-31"
+            else:
+                fecha_fin_query = (datetime(anio_seleccionado, mes_seleccionado + 1, 1) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+        else:
+            # Opción de Rango Libre (Ideal para ver semanas o cruces de meses)
+            col_desde, col_hasta = st.columns(2)
+            with col_desde:
+                fecha_inicio_sel = st.date_input("Desde el día:", value=datetime.now() - timedelta(days=7))
+            with col_hasta:
+                fecha_fin_sel = st.date_input("Hasta el día:", value=datetime.now() + timedelta(days=7))
+            
+            fecha_inicio_query = fecha_inicio_sel.strftime("%Y-%m-%d")
+            fecha_fin_query = fecha_fin_sel.strftime("%Y-%m-%d")
+
+        # 2. Query unificada de alto rendimiento usando rangos seguros (BETWEEN)
+        query_analitica = """
             SELECT fecha, COUNT(id_cita) as total_citas
             FROM citas
-            WHERE EXTRACT(MONTH FROM fecha) = %s 
-              AND EXTRACT(YEAR FROM fecha) = %s
+            WHERE fecha BETWEEN %s AND %s
               AND estado != 'Cancelada'
             GROUP BY fecha
             ORDER BY fecha ASC
         """
         
         try:
-            df_mes = pd.read_sql(query_mensual, conn, params=[mes_seleccionado, col_anio])
+            # Pasamos los parámetros de fecha calculados de forma segura a TiDB
+            df_mes = pd.read_sql(query_analitica, conn, params=[fecha_inicio_query, fecha_fin_query])
             
             if not df_mes.empty:
                 # Convertimos la columna fecha a tipo datetime para formatear el eje X limpiamente
@@ -441,13 +470,13 @@ if menu == "Agenda Diaria Sillon":
                 
                 # Buscamos el día con más movimiento (El pico más alto)
                 dia_pico_row = df_mes.loc[df_mes['total_citas'].idxmax()]
-                fecha_pico_str = dia_pico_row['fecha'].strftime('%d de %B')
+                fecha_pico_str = dia_pico_row['fecha'].strftime('%d de %B de %Y')
                 max_citas = dia_pico_row['total_citas']
                 
                 # Métrica informativa destacada para el doctor
-                st.info(f"🔥 **Día de mayor demanda:** El **{fecha_pico_str}** fue el día más lleno con **{max_citas} citas** agendadas.")
+                st.info(f"🔥 **Día de mayor demanda en este rango:** El **{fecha_pico_str}** fue el día más lleno con **{max_citas} citas** agendadas.")
                 
-                # 3. Preparar los datos exclusivos para la gráfica (Eje X: Fecha, Eje Y: Total Citas)
+                # 3. Preparar los datos exclusivos para la gráfica (Eje X: Fecha)
                 df_grafica = df_mes.set_index('fecha')[['total_citas']]
                 
                 # Dibujamos el Gráfico de Barras interactivo nativo de Streamlit
@@ -455,7 +484,6 @@ if menu == "Agenda Diaria Sillon":
                 
                 # 4. Tabla detallada abajo para control numérico exacto
                 with st.expander("📄 Ver desglose en tabla detallada"):
-                    # Formateamos la fecha para que se vea más amigable en la tabla
                     df_tabla = df_mes.copy()
                     df_tabla['Día'] = df_tabla['fecha'].dt.strftime('%A %d-%m-%Y')
                     df_tabla = df_tabla.rename(columns={'total_citas': 'Cantidad de Citas'})
@@ -466,10 +494,10 @@ if menu == "Agenda Diaria Sillon":
                         hide_index=True
                     )
             else:
-                st.warning("⚠️ No se encontraron citas agendadas para el mes y año seleccionados.")
+                st.warning("⚠️ No se encontraron citas agendadas para el período seleccionado.")
                 
         except Exception as e:
-            st.error(f"Error al generar las métricas mensuales: {e}")
+            st.error(f"Error al generar las métricas analíticas: {e}")
 
         # --- 3. DETALLE Y ASISTENCIA ---
         st.write("### 📝 Control de Asistencia")
