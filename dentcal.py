@@ -399,6 +399,77 @@ if menu == "Agenda Diaria Sillon":
         # 4. Renderizado final de la cuadrícula
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
+        #############################################
+        # --- SECCIÓN DE ANALÍTICA MENSAL ---
+        st.write("---")
+        st.write("### 📈 Análisis de Demanda Mensual")
+        
+        # 1. Filtro de Mes y Año para la consulta
+        col_mes, col_anio = st.columns(2)
+        with col_mes:
+            mes_seleccionado = st.selectbox(
+                "Seleccione el Mes:",
+                options=range(1, 13),
+                format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
+                                       "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x-1],
+                index=datetime.now().month - 1
+            )
+        with col_anio:
+            anio_seleccionado = st.selectbox(
+                "Seleccione el Año:",
+                options=[datetime.now().year - 1, datetime.now().year, datetime.now().year + 1],
+                index=1
+            )
+
+        # 2. Query para extraer TODAS las citas de ese mes específico desde TiDB
+        query_mensual = """
+            SELECT fecha, COUNT(id_cita) as total_citas
+            FROM citas
+            WHERE EXTRACT(MONTH FROM fecha) = %s 
+              AND EXTRACT(YEAR FROM fecha) = %s
+              AND estado != 'Cancelada'
+            GROUP BY fecha
+            ORDER BY fecha ASC
+        """
+        
+        try:
+            df_mes = pd.read_sql(query_mensual, conn, params=[mes_seleccionado, col_anio])
+            
+            if not df_mes.empty:
+                # Convertimos la columna fecha a tipo datetime para formatear el eje X limpiamente
+                df_mes['fecha'] = pd.to_datetime(df_mes['fecha'])
+                
+                # Buscamos el día con más movimiento (El pico más alto)
+                dia_pico_row = df_mes.loc[df_mes['total_citas'].idxmax()]
+                fecha_pico_str = dia_pico_row['fecha'].strftime('%d de %B')
+                max_citas = dia_pico_row['total_citas']
+                
+                # Métrica informativa destacada para el doctor
+                st.info(f"🔥 **Día de mayor demanda:** El **{fecha_pico_str}** fue el día más lleno con **{max_citas} citas** agendadas.")
+                
+                # 3. Preparar los datos exclusivos para la gráfica (Eje X: Fecha, Eje Y: Total Citas)
+                df_grafica = df_mes.set_index('fecha')[['total_citas']]
+                
+                # Dibujamos el Gráfico de Barras interactivo nativo de Streamlit
+                st.bar_chart(df_grafica, color="#2471A3")
+                
+                # 4. Tabla detallada abajo para control numérico exacto
+                with st.expander("📄 Ver desglose en tabla detallada"):
+                    # Formateamos la fecha para que se vea más amigable en la tabla
+                    df_tabla = df_mes.copy()
+                    df_tabla['Día'] = df_tabla['fecha'].dt.strftime('%A %d-%m-%Y')
+                    df_tabla = df_tabla.rename(columns={'total_citas': 'Cantidad de Citas'})
+                    
+                    st.dataframe(
+                        df_tabla[['Día', 'Cantidad de Citas']], 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+            else:
+                st.warning("⚠️ No se encontraron citas agendadas para el mes y año seleccionados.")
+                
+        except Exception as e:
+            st.error(f"Error al generar las métricas mensuales: {e}")
 
         # --- 3. DETALLE Y ASISTENCIA ---
         st.write("### 📝 Control de Asistencia")
