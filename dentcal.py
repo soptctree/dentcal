@@ -283,7 +283,6 @@ if menu == "Agenda Diaria Sillon":
         
         # --- 🕒 LÓGICA DE OCUPACIÓN Y ESTADÍSTICAS ---
         horas_base = range(7, 18)  # De 7 AM a 5 PM
-        cuartos = [0, 15, 30, 45]
         
         # Contamos cuántas citas reales (únicas) hay hoy
         total_citas_hoy = len(df_activas) if not df_activas.empty else 0
@@ -338,47 +337,66 @@ if menu == "Agenda Diaria Sillon":
 
         html_grid = "<div class='hour-container'>"
 
-        # 2. Iteramos únicamente por hora entera
+        # 2. Iteramos únicamente por hora entera con la matemática de cuartos blindada
         for hora in horas_base:
-            cuartos_ocupados = 0
-            ultimo_minuto_ocupado = 0
+            estados_cuartos = []
+            ultimo_bloque_ocupado = None
             
+            # Evaluamos de forma individual los 4 cuartos de esta hora
             for cuarto in [0, 15, 30, 45]:
                 bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
                 bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
                 
+                ocupado = False
                 if not df_activas.empty:
                     for _, r in df_activas.iterrows():
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
                         if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
-                            cuartos_ocupados += 1
-                            ultimo_minuto_ocupado = cuarto + 15
+                            ocupado = True
                             break
+                
+                if ocupado:
+                    estados_cuartos.append(1)
+                    ultimo_bloque_ocupado = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
+                else:
+                    estados_cuartos.append(0)
             
-            porcentaje_rojo = cuartos_ocupados * 25
+            # --- CONSTRUCCIÓN DEL TEXTO INFORMATIVO ---
+            cuartos_ocupados = sum(estados_cuartos)
             
             if cuartos_ocupados == 4:
                 texto_arriba = "Ocupado"
-            elif cuartos_ocupados > 0:
-                texto_arriba = f"Hasta las {hora}:{ultimo_minuto_ocupado:02d}"
+            elif cuartos_ocupados > 0 and ultimo_bloque_ocupado:
+                # El .strftime('%H:%M') convierte automáticamente los 60 minutos en la siguiente hora en punto
+                texto_arriba = f"Hasta las {ultimo_bloque_ocupado.strftime('%H:%M')}"
             else:
                 texto_arriba = "Disponible"
             
-            if porcentaje_rojo == 100:
+            # --- MAQUILLAJE DE FONDOS CON CSS (Pintado exacto por cuartos individuales) ---
+            if cuartos_ocupados == 4:
                 estilo_fondo = "background-color: #FFD2D2; border-color: #D8000C; color: #D8000C;"
-            elif porcentaje_rojo == 0:
+            elif cuartos_ocupados == 0:
                 estilo_fondo = "background-color: #DFF2BF; border-color: #4F8A10; color: #4F8A10;"
             else:
-                estilo_fondo = f"background: linear-gradient(to right, #FFD2D2 {porcentaje_rojo}%, #DFF2BF {porcentaje_rojo}%); border-color: #cca4a4;"
+                # Creamos un degradado fragmentado de 4 segmentos (25% cada uno)
+                partes_css = []
+                for i, estado in enumerate(estados_cuartos):
+                    color = "#FFD2D2" if estado == 1 else "#DFF2BF"
+                    inicio_pct = i * 25
+                    fin_pct = (i + 1) * 25
+                    partes_css.append(f"{color} {inicio_pct}%, {color} {fin_pct}%")
+                
+                degradado_completo = ", ".join(partes_css)
+                estilo_fondo = f"background: linear-gradient(to right, {degradado_completo}); border-color: #cca4a4;"
 
             # LINEA TOTALMENTE PLANA SIN SALTOS DE LINEA INVISIBLES
             html_grid += f"<div class='hour-card' style='{estilo_fondo}'><span class='top-indicator'>📋 {texto_arriba}</span><span class='time-label'>{hora:02d}:00</span></div>"
 
         html_grid += "</div>"
         
-        # 4. Renderizado final libre de errores
+        # 4. Renderizado final de la cuadrícula
         st.markdown(html_grid, unsafe_allow_html=True)
         st.divider()
 
