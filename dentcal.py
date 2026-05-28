@@ -445,28 +445,31 @@ if menu == "Agenda Diaria Sillon":
                         
                         nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
                         
+                        # Creamos un contenedor dinámico para los mensajes dentro del expander
+                        contenedor_mensaje = st.empty()
+                        
                         if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
-                            # 1. Capturamos el momento exacto actual (Fecha y Hora)
                             ahora = datetime.now()
                             
-                            # 2. Solución al KeyError: Usamos la fecha del componente 'fecha_agenda' que definiste arriba
-                            # Nos aseguramos de extraer solo la parte de la fecha (.date()) si viene combinada
                             if isinstance(fecha_agenda, datetime):
                                 fecha_segura = fecha_agenda.date()
                             else:
-                                fecha_segura = fecha_agenda  # Ya es un objeto datetime.date
+                                fecha_segura = fecha_agenda
                             
-                            # 3. Combinamos la fecha seleccionada con la hora de inicio de la cita
                             momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
                             
-                            # 4. Validación de tiempo estricta
                             if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                st.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                # Renderizamos el error dentro del contenedor dinámico
+                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                # Esperamos 3 segundos en pantalla
+                                t_sleep.sleep(3)
+                                # Limpiamos el mensaje por completo sin alterar el estado del formulario
+                                contenedor_mensaje.empty()
                             else:
                                 cursor = conn.cursor()
                                 cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
                                 conn.commit()
-                                st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
                                 t_sleep.sleep(1)
                                 st.rerun()       
 
