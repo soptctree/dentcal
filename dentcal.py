@@ -638,7 +638,8 @@ if menu == "Agenda Diaria Sillon":
             if conn:
                 conn.close()
 
-        # --- 3. DETALLE Y ASISTENCIA ---
+     
+    # --- 3. DETALLE Y ASISTENCIA ---
     st.write("### 📝 Control de Asistencia y Reprogramación")
     if df_todas.empty:
         st.info("No hay pacientes agendados para esta fecha.")
@@ -654,14 +655,31 @@ if menu == "Agenda Diaria Sillon":
                 contenedor_mensaje = st.empty()
                 lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
                 
-                # --- PARTE A: CONTROL DE ESTADOS (BLOQUEADO SI ESTÁ CANCELADA) ---
-                if estado_actual == "Cancelada":
-                    st.selectbox("Actualizar estado:", ["Cancelada"], index=0, disabled=True, key=f"upd_{row['id_cita']}")
+                # --- PARTE A: CONTROL DE ESTADOS CON CANDADO DE INMUTABILIDAD ---
+                if estado_actual in ["Cancelada", "Ausente", "Liquidada"]:
+                    # Mensajes personalizados de bloqueo según el estado inmutable
+                    if estado_actual == "Liquidada":
+                        st.success("🔒 **Registro Cerrado:** Esta cita ya fue cobrada y asentada en caja. No admite cambios.")
+                    elif estado_actual == "Ausente":
+                        st.error("🔒 **Registro Cerrado:** Paciente marcado como Ausente. No se permite volver a editar.")
+                    elif estado_actual == "Cancelada":
+                        st.warning("🔒 **Registro Cerrado:** Cita Cancelada. No se permite volver a editar.")
+                    
+                    # Selectbox bloqueado mostrando el estado fijo
+                    st.selectbox("Estado del Turno:", [estado_actual], index=0, disabled=True, key=f"upd_{row['id_cita']}")
+                    
+                    # Si está Liquidada, podrías opcionalmente dar acceso directo a ver/reimprimir factura en la otra pestaña
+                    if estado_actual == "Liquidada":
+                        if st.button("🖨️ Ver Factura en Caja", key=f"liq_locked_{row['id_cita']}", use_container_width=True):
+                            st.session_state['id_cita_facturar'] = row['id_cita']
+                            st.session_state['id_paciente_facturar'] = row.get('id_paciente', None)
+                            st.session_state['nombre_paciente_facturar'] = row['nombre']
+                            st.rerun()
                 else:
+                    # Flujo activo únicamente para "Pendiente" o "Asistió"
                     idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
                     nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
                     
-                    # Creamos dos columnas para poner los botones en paralelo de forma elegante
                     col_btn_guardar, col_btn_liquidar = st.columns(2)
                     
                     with col_btn_guardar:
@@ -670,8 +688,9 @@ if menu == "Agenda Diaria Sillon":
                             fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
                             momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
                             
+                            # REGLA DEL PAPEL: No permitir 'Asistió' antes de tiempo
                             if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza a las {h_i_obj.strftime('%H:%M')}.")
                                 t_sleep.sleep(3)
                                 contenedor_mensaje.empty()
                             else:
@@ -692,20 +711,29 @@ if menu == "Agenda Diaria Sillon":
                                     if conn_accion:
                                         conn_accion.close()
                     
-                    # --- INYECCIÓN DEL BOTÓN DE FACTURACIÓN (MÉTODO SEGURO CON .get()) ---
                     with col_btn_liquidar:
-                        if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", use_container_width=True):
-                            st.session_state['id_cita_facturar'] = row['id_cita']
-                            # Si id_paciente no viene en la consulta de la agenda, usa None para evitar KeyError
-                            st.session_state['id_paciente_facturar'] = row.get('id_paciente', None)
-                            st.session_state['nombre_paciente_facturar'] = row['nombre']
-                            st.rerun()
+                        # REGLA DEL PAPEL: El botón de Cobrar se habilita EXCLUSIVAMENTE si ya está guardado como "Asistió"
+                        if estado_actual == "Asistió":
+                            if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", type="primary", use_container_width=True):
+                                st.session_state['id_cita_facturar'] = row['id_cita']
+                                st.session_state['id_paciente_facturar'] = row.get('id_paciente', None)
+                                st.session_state['nombre_paciente_facturar'] = row['nombre']
+                                st.rerun()
+                        else:
+                            st.button(
+                                "💵 Cobrar / Liquidar", 
+                                key=f"liq_dis_{row['id_cita']}", 
+                                disabled=True, 
+                                use_container_width=True,
+                                help="Esta acción solo se habilita una vez que guardes el estado de la cita como 'Asistió'."
+                            )
                 
                 # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
-                if estado_actual in ["Cancelada", "Ausente", "Pendiente"]:
+                # Modificado para que SOLO se muestre si la cita está en estado "Pendiente"
+                # Si está Cancelada, Ausente o Liquidada, se quita la reubicación para cumplir el diseño del papel
+                if estado_actual == "Pendiente":
                     st.write("---")
-                    tipo_accion = "🔄 Reprogramar Cita (Cancelada)" if estado_actual == "Cancelada" else "🕒 Trasladar Hora (Retraso/Ausente)"
-                    st.write(f"**{tipo_accion}**")
+                    st.write("**🕒 Trasladar Hora (Retraso)**")
                     
                     c1, c2, c3 = st.columns(3)
                     nueva_fecha = c1.date_input("Nueva Fecha", value=fecha_agenda, key=f"f_rep_{row['id_cita']}")
