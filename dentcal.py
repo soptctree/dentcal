@@ -426,6 +426,7 @@ if menu == "Agenda Diaria Sillon":
                 if conn:
                     conn.close()
 
+            
             # --- 3. DETALLE Y ASISTENCIA ---
             st.write("### 📝 Control de Asistencia")
             if df_todas.empty:
@@ -448,28 +449,26 @@ if menu == "Agenda Diaria Sillon":
                             # 1. Capturamos el momento exacto actual (Fecha y Hora)
                             ahora = datetime.now()
                             
-                            # 2. Convertimos la fecha de la cita de forma ultra segura sin usar el tipo 'date' suelto
-                            if isinstance(row['fecha'], datetime):
-                                fecha_cita = row['fecha'].date()
-                            elif hasattr(row['fecha'], 'date'):  # Por si es un objeto date de otra librería
-                                fecha_cita = row['fecha']
+                            # 2. Solución al KeyError: Usamos la fecha del componente 'fecha_agenda' que definiste arriba
+                            # Nos aseguramos de extraer solo la parte de la fecha (.date()) si viene combinada
+                            if isinstance(fecha_agenda, datetime):
+                                fecha_segura = fecha_agenda.date()
                             else:
-                                # Si viene como cadena de texto (String) desde la base de datos
-                                fecha_cita = datetime.strptime(str(row['fecha']), "%Y-%m-%d").date()
+                                fecha_segura = fecha_agenda  # Ya es un objeto datetime.date
                             
-                            # 3. Combinamos para obtener el momento exacto de inicio
-                            momento_exacto_cita = datetime.combine(fecha_cita, h_i_obj)
+                            # 3. Combinamos la fecha seleccionada con la hora de inicio de la cita
+                            momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
                             
-                            # 4. Validación estricta: No permitir "Asistió" antes de tiempo
+                            # 4. Validación de tiempo estricta
                             if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                st.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_cita.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                st.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
                             else:
                                 cursor = conn.cursor()
                                 cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
                                 conn.commit()
                                 st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
                                 t_sleep.sleep(1)
-                                st.rerun()        
+                                st.rerun()       
 
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE (SIN GRÁFICAS)
