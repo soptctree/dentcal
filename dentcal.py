@@ -3,6 +3,11 @@ import pandas as pd
 from datetime import datetime, time, timedelta, date
 import time as t_sleep
 import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
 
 st.set_page_config(
     page_title="DentCal: Gestión Odontológica",
@@ -573,100 +578,206 @@ if menu == "Agenda Diaria Sillon":
             st.info("💡 Escribe el nombre del paciente para ver qué día y a qué hora tiene citas asignadas en el sistema.")
 
     with tab_auditoria:
-                st.write("### 📊 Historial y Auditoría Global de Citas")
-                st.write("Consulte y supervise el estado de todos los turnos históricos asentados en el sistema.")
-                
-                # --- FILTROS DE BÚSQUEDA ---
-                c1, c2, c3 = st.columns(3)
-                fecha_inicio = c1.date_input("Desde:", value=date.today() - timedelta(days=7), key="audit_desde")
-                fecha_fin = c2.date_input("Hasta:", value=date.today() + timedelta(days=15), key="audit_hasta")
-                
-                estados_seleccionados = c3.multiselect(
-                    "Filtrar por Estado:",
-                    options=["Pendiente", "Asistió", "Ausente", "Cancelada"],
-                    default=["Cancelada", "Ausente", "Asistió"],
-                    key="audit_estados"
-                )
+        st.write("### 📊 Historial y Auditoría Global de Citas")
+        st.write("Consulte y supervise el estado de todos los turnos históricos asentados en el sistema.")
+        
+        # --- FILTROS DE BÚSQUEDA ---
+        c1, c2, c3 = st.columns(3)
+        fecha_inicio = c1.date_input("Desde:", value=date.today() - timedelta(days=7), key="audit_desde")
+        fecha_fin = c2.date_input("Hasta:", value=date.today() + timedelta(days=15), key="audit_hasta")
+        
+        estados_seleccionados = c3.multiselect(
+            "Filtrar por Estado:",
+            options=["Pendiente", "Asistió", "Ausente", "Cancelada"],
+            default=["Cancelada", "Ausente", "Asistió"],
+            key="audit_estados"
+        )
 
-                if fecha_inicio > fecha_fin:
-                    st.error("❌ La fecha de inicio no puede ser mayor a la fecha de fin.")
-                else:
-                    # --- CONSULTA SEGURA A LA BASE DE DATOS ---
-                    conn_audit = None
-                    df_auditoria = pd.DataFrame()
-                    try:
-                        conn_audit = conectar_db()
-                        cursor_audit = conn_audit.cursor()
-                        query_audit = """
-                            SELECT c.id_cita, c.fecha, c.hora_inicio, c.hora_fin, p.nombre, 
-                                IFNULL(p.cedula, 'S/N') as cedula, c.estado 
-                            FROM citas c 
-                            JOIN pacientes p ON c.id_paciente = p.id_paciente 
-                            WHERE c.fecha BETWEEN %s AND %s
-                            ORDER BY c.fecha DESC, c.hora_inicio ASC
+        if fecha_inicio > fecha_fin:
+            st.error("❌ La fecha de inicio no puede ser mayor a la fecha de fin.")
+        else:
+            # --- CONSULTA SEGURA A LA BASE DE DATOS ---
+            conn_audit = None
+            df_auditoria = pd.DataFrame()
+            try:
+                conn_audit = conectar_db()
+                cursor_audit = conn_audit.cursor()
+                query_audit = """
+                    SELECT c.id_cita, c.fecha, c.hora_inicio, c.hora_fin, p.nombre, 
+                        IFNULL(p.cedula, 'S/N') as cedula, c.estado 
+                    FROM citas c 
+                    JOIN pacientes p ON c.id_paciente = p.id_paciente 
+                    WHERE c.fecha BETWEEN %s AND %s
+                    ORDER BY c.fecha DESC, c.hora_inicio ASC
+                """
+                cursor_audit.execute(query_audit, (fecha_inicio, fecha_fin))
+                columnas = [desc[0] for desc in cursor_audit.description]
+                df_auditoria = pd.DataFrame(cursor_audit.fetchall(), columns=columnas)
+                cursor_audit.close()
+            except Exception as e:
+                st.error(f"Error al cargar la auditoría: {e}")
+            finally:
+                if conn_audit:
+                    conn_audit.close()
+
+            # Filtrado local en Pandas
+            if not df_auditoria.empty and estados_seleccionados:
+                df_auditoria = df_auditoria[df_auditoria['estado'].isin(estados_seleccionados)]
+
+            st.write("---")
+            st.write(f"#### 📋 Registros Encontrados ({len(df_auditoria)} cita/s)")
+
+            if df_auditoria.empty:
+                st.info("No se encontraron registros históricos para los filtros seleccionados.")
+            else:
+                # --- SECCIÓN DE EXPORTACIÓN (EXCEL Y PDF) ---
+                st.write("### 📥 Exportar Reporte")
+                col_xl, col_pdf = st.columns(2)
+
+                # ---- LÓGICA DE EXPORTACIÓN A EXCEL ----
+                with col_xl:
+                    buffer_excel = BytesIO()
+                    df_exportar = df_auditoria.copy()
+                    
+                    # Formateo de tiempos seguro para evitar conflictos de tipo de datos en Excel
+                    for col_time in ['hora_inicio', 'hora_fin']:
+                        df_exportar[col_time] = df_exportar[col_time].apply(
+                            lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else str(x)[:5]
+                        )
+                    df_exportar['fecha'] = df_exportar['fecha'].apply(
+                        lambda x: x.strftime('%Y-%m-%d') if isinstance(x, (date, datetime)) else str(x)
+                    )
+                    
+                    df_exportar.columns = ['ID Cita', 'Fecha', 'Hora Inicio', 'Hora Fin', 'Paciente', 'Cédula/ID', 'Estado']
+
+                    with pd.ExcelWriter(buffer_excel, engine='openpyxl') as writer:
+                        df_exportar.to_excel(writer, index=False, sheet_name='Auditoría de Citas')
+                    
+                    st.download_button(
+                        label="🟢 Descargar Reporte en Excel",
+                        data=buffer_excel.getvalue(),
+                        file_name=f"Auditoria_DentCal_{fecha_inicio}_al_{fecha_fin}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_download_excel"
+                    )
+
+                # ---- LÓGICA DE EXPORTACIÓN A PDF (REPORTLAB) ----
+                with col_pdf:
+                    buffer_pdf = BytesIO()
+                    doc = SimpleDocTemplate(
+                        buffer_pdf, 
+                        pagesize=letter,
+                        rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40
+                    )
+                    
+                    story = []
+                    styles = getSampleStyleSheet()
+                    
+                    estilo_titulo = ParagraphStyle(
+                        'TituloPDF', parent=styles['Heading1'], fontSize=18, leading=22, textColor=colors.HexColor('#1f3864'), spaceAfter=10
+                    )
+                    estilo_sub = ParagraphStyle(
+                        'SubPDF', parent=styles['Normal'], fontSize=10, textColor=colors.HexColor('#555555'), spaceAfter=20
+                    )
+                    estilo_celda = ParagraphStyle(
+                        'CeldaPDF', parent=styles['Normal'], fontSize=9, leading=11
+                    )
+                    estilo_cabecera = ParagraphStyle(
+                        'CabeceraPDF', parent=styles['Normal'], fontSize=9, fontName='Helvetica-Bold', textColor=colors.white
+                    )
+
+                    story.append(Paragraph("🦷 DentCal: Reporte de Auditoría Clínica", estilo_titulo))
+                    story.append(Paragraph(f"Rango consultado: Desde {fecha_inicio.strftime('%d/%m/%Y')} hasta {fecha_fin.strftime('%d/%m/%Y')} | Generado el: {datetime.now().strftime('%d/%m/%Y %H:%M')}", estilo_sub))
+                    story.append(Spacer(1, 10))
+
+                    tabla_datos = [[
+                        Paragraph("Fecha", estilo_cabecera), 
+                        Paragraph("Horario", estilo_cabecera), 
+                        Paragraph("Paciente", estilo_cabecera), 
+                        Paragraph("Cédula/ID", estilo_cabecera), 
+                        Paragraph("Estado", estilo_cabecera)
+                    ]]
+
+                    for _, r in df_auditoria.iterrows():
+                        f_txt = r['fecha'].strftime('%d/%m/%Y') if isinstance(r['fecha'], (date, datetime)) else str(r['fecha'])
+                        h_i = (datetime.min + r['hora_inicio']).time().strftime('%H:%M') if isinstance(r['hora_inicio'], timedelta) else str(r['hora_inicio'])[:5]
+                        h_f = (datetime.min + r['hora_fin']).time().strftime('%H:%M') if isinstance(r['hora_fin'], timedelta) else str(r['hora_fin'])[:5]
+                        
+                        tabla_datos.append([
+                            Paragraph(f_txt, estilo_celda),
+                            Paragraph(f"{h_i} - {h_f}", estilo_celda),
+                            Paragraph(r['nombre'], estilo_celda),
+                            Paragraph(r['cedula'], estilo_celda),
+                            Paragraph(r['estado'], estilo_celda)
+                        ])
+
+                    tabla_pdf = Table(tabla_datos, colWidths=[70, 85, 180, 100, 80])
+                    tabla_pdf.setStyle(TableStyle([
+                        ('BACKGROUND', (0,0), (-1,0), colors.HexColor('#1f3864')),
+                        ('ALIGN', (0,0), (-1,-1), 'LEFT'),
+                        ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+                        ('BOTTOMPADDING', (0,0), (-1,0), 8),
+                        ('TOPPADDING', (0,0), (-1,0), 8),
+                        ('GRID', (0,0), (-1,-1), 0.5, colors.HexColor('#e0e0e0')),
+                        ('ROWBACKGROUNDS', (0,1), (-1,-1), [colors.white, colors.HexColor('#f9fbfd')])
+                    ]))
+                    
+                    story.append(tabla_pdf)
+                    doc.build(story)
+                    
+                    st.download_button(
+                        label="🔴 Descargar Reporte en PDF",
+                        data=buffer_pdf.getvalue(),
+                        file_name=f"Reporte_DentCal_{fecha_inicio}_al_{fecha_fin}.pdf",
+                        mime="application/pdf",
+                        key="btn_download_pdf"
+                    )
+                
+                st.write("---")
+
+                # --- RENDERIZADO VISUAL EN LA INTERFAZ DE TARJETAS Y ACORDEONES ---
+                # Agrupamos por la columna 'fecha' sin reordenar para respetar el DESC de la consulta
+                for fecha_grupo, df_dia in df_auditoria.groupby('fecha', sort=False):
+                    fecha_bonita = fecha_grupo.strftime('%A, %d de %B de %Y') if isinstance(fecha_grupo, (date, datetime)) else str(fecha_grupo)
+                    st.markdown(f"##### 📅 {fecha_bonita}")
+                    
+                    # Tarjetas horizontales de estados
+                    html_cards = "<div style='display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;'>"
+                    for _, row_card in df_dia.iterrows():
+                        h_i_txt = (datetime.min + row_card['hora_inicio']).time().strftime('%H:%M') if isinstance(row_card['hora_inicio'], timedelta) else str(row_card['hora_inicio'])[:5]
+                        
+                        if row_card['estado'] == "Ausente":
+                            style_bg = "background-color: #ffcccc; border-left: 5px solid #ff0000; color: #a00;"
+                        elif row_card['estado'] == "Cancelada":
+                            style_bg = "background-color: #e2f0d9; border-left: 5px solid #70ad47; color: #385723;"
+                        elif row_card['estado'] == "Asistió":
+                            style_bg = "background-color: #d9e1f2; border-left: 5px solid #4472c4; color: #1f3864;"
+                        else:
+                            style_bg = "background-color: #fff2cc; border-left: 5px solid #ffc000; color: #7f6000;"
+                        
+                        html_cards += f"""
+                        <div style='padding: 8px 12px; border-radius: 6px; min-width: 130px; text-align: center; font-size: 12px; font-weight: bold; {style_bg}'>
+                            <span>{row_card['estado']}</span><br>
+                            <span style='font-size: 11px; font-weight: normal; color: #333;'>{row_card['nombre'].split()[0]}</span><br>
+                            <span style='font-size: 14px;'>{h_i_txt}</span>
+                        </div>
                         """
-                        cursor_audit.execute(query_audit, (fecha_inicio, fecha_fin))
-                        columnas = [desc[0] for desc in cursor_audit.description]
-                        df_auditoria = pd.DataFrame(cursor_audit.fetchall(), columns=columnas)
-                        cursor_audit.close()
-                    except Exception as e:
-                        st.error(f"Error al cargar la auditoría: {e}")
-                    finally:
-                        if conn_audit:
-                            conn_audit.close()
-
-                    # Filtrado local en Pandas
-                    if not df_auditoria.empty and estados_seleccionados:
-                        df_auditoria = df_auditoria[df_auditoria['estado'].isin(estados_seleccionados)]
-
-                    st.write("---")
-                    st.write(f"#### 📋 Registros Encontrados ({len(df_auditoria)} cita/s)")
-
-                    if df_auditoria.empty:
-                        st.info("No se encontraron registros históricos para los filtros seleccionados.")
-                    else:
-                        # Agrupamos cronológicamente por día (de más nuevo a más viejo)
-                        for fecha_grupo, df_dia in df_auditoria.groupby('fecha', sort=False):
-                            fecha_bonita = fecha_grupo.strftime('%A, %d de %B de %Y')
-                            st.markdown(f"##### 📅 {fecha_bonita}")
-                            
-                            # --- INTERFAZ DE MINI-TARJETAS UNIFICADAS ---
-                            html_cards = "<div style='display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;'>"
-                            for _, row_card in df_dia.iterrows():
-                                h_i_txt = (datetime.min + row_card['hora_inicio']).time().strftime('%H:%M') if isinstance(row_card['hora_inicio'], timedelta) else row_card['hora_inicio'].strftime('%H:%M')
-                                
-                                if row_card['estado'] == "Ausente":
-                                    style_bg = "background-color: #ffcccc; border-left: 5px solid #ff0000; color: #a00;"
-                                elif row_card['estado'] == "Cancelada":
-                                    style_bg = "background-color: #e2f0d9; border-left: 5px solid #70ad47; color: #385723;"
-                                elif row_card['estado'] == "Asistió":
-                                    style_bg = "background-color: #d9e1f2; border-left: 5px solid #4472c4; color: #1f3864;"
-                                else:  # Pendiente
-                                    style_bg = "background-color: #fff2cc; border-left: 5px solid #ffc000; color: #7f6000;"
-                                
-                                html_cards += f"""
-                                <div style='padding: 8px 12px; border-radius: 6px; min-width: 130px; text-align: center; font-size: 12px; font-weight: bold; {style_bg}'>
-                                    <span>{row_card['estado']}</span><br>
-                                    <span style='font-size: 11px; font-weight: normal; color: #333;'>{row_card['nombre'].split()[0]}</span><br>
-                                    <span style='font-size: 14px;'>{h_i_txt}</span>
-                                </div>
-                                """
-                            html_cards += "</div>"
-                            st.markdown(html_cards, unsafe_allow_html=True)
-                            
-                            # --- DETALLE EN ACORDEONES ---
-                            for _, row in df_dia.iterrows():
-                                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
-                                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
-                                time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
-                                
-                                emoji_estado = "⚪" if row['estado'] == "Cancelada" else "❌" if row['estado'] == "Ausente" else "✅" if row['estado'] == "Asistió" else "⏰"
-                                
-                                with st.expander(f"{emoji_estado} {time_range} | 👤 {row['nombre']} ({row['estado']})"):
-                                    st.write(f"**Cédula/ID:** {row['cedula']}")
-                                    st.write(f"**Horario del bloque:** {time_range}")
-                                    st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
-                            st.write("")        
+                    html_cards += "</div>"
+                    st.markdown(html_cards, unsafe_allow_html=True)
+                    
+                    # Desglose en acordeones (expanders)
+                    for _, row in df_dia.iterrows():
+                        h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                        h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                        time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+                        
+                        emoji_estado = "⚪" if row['estado'] == "Cancelada" else "❌" if row['estado'] == "Ausente" else "✅" if row['estado'] == "Asistió" else "⏰"
+                        
+                        with st.expander(f"{emoji_estado} {time_range} | 👤 {row['nombre']} ({row['estado']})"):
+                            st.write(f"**Cédula/ID:** {row['cedula']}")
+                            st.write(f"**Horario del bloque:** {time_range}")
+                            st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
+                    st.write("")
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
