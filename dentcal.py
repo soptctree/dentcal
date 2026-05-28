@@ -992,10 +992,30 @@ if menu == "Agenda Diaria Sillon":
                             st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
                     st.write("")
     
-# --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+
     # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
 # ==============================================================================
     with tab_facturacion:
+        # 0. ASEGURAR EXISTENCIA DE LA TABLA INGRESOS EN TU BASE DE DATOS
+        try:
+            conn_init = conectar_db()
+            with conn_init.cursor() as cursor_init:
+                cursor_init.execute("""
+                    CREATE TABLE IF NOT EXISTS ingresos (
+                        id_ingreso INT AUTO_INCREMENT PRIMARY KEY,
+                        id_cita INT NOT NULL,
+                        id_paciente INT NOT NULL,
+                        monto DECIMAL(10,2) NOT NULL,
+                        fecha DATETIME NOT NULL
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+                """)
+            conn_init.commit()
+        except Exception as e_init:
+            st.warning(f"Aviso de inicialización de tabla: {e_init}")
+        finally:
+            if 'conn_init' in locals() and conn_init:
+                conn_init.close()
+
         # 1. Recuperamos los datos de la sesión que guardó el botón del expander
         id_cita_sel = st.session_state.get('id_cita_facturar')
         id_paciente_sel = st.session_state.get('id_paciente_facturar')
@@ -1031,7 +1051,7 @@ if menu == "Agenda Diaria Sillon":
                 except Exception as e:
                     st.error(f"Error al recuperar ID de respaldo: {e}")
                 finally:
-                    if conn_remedio: 
+                    if 'conn_remedio' in locals() and conn_remedio: 
                         conn_remedio.close()
 
             if id_p_seguro is None:
@@ -1048,8 +1068,6 @@ if menu == "Agenda Diaria Sillon":
             st.write("---")
             st.markdown("### 🖨️ Finalizar Transacción y Emitir Comprobante")
             
-            # Intentamos calcular o extraer el monto neto directamente (Ajusta la variable según tu función)
-            # Si usas una variable global o state, la leemos; si no, usamos un estimado del balance
             monto_a_cobrar = st.session_state.get('monto_calculado_neto', 305.00) 
             
             col_procesar, col_pdf_btn = st.columns(2)
@@ -1079,6 +1097,7 @@ if menu == "Agenda Diaria Sillon":
                         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
                         from reportlab.lib import colors
                         import io
+                        from datetime import datetime
 
                         buffer = io.BytesIO()
                         doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
@@ -1101,7 +1120,7 @@ if menu == "Agenda Diaria Sillon":
                     except Exception as e:
                         st.error(f"Error al asentar la venta: {e}")
                     finally:
-                        if conn: conn.close()
+                        if 'conn' in locals() and conn: conn.close()
 
             # Si el pago ya fue asentado, liberamos los canales de distribución
             if st.session_state.get('venta_exitosa') and 'pdf_bytes' in st.session_state:
@@ -1136,7 +1155,6 @@ if menu == "Agenda Diaria Sillon":
                     st.rerun()
 
         else:
-            # Mensaje por defecto cuando entran a la pestaña sin elegir un paciente primero
             st.info("💡 **Sin transacciones activas:** Ve a la pestaña 'Vista del Día' o 'Buscar Cita por Nombre' y presiona el botón '💵 Cobrar / Liquidar' en el paciente correspondiente para cargar la caja.")
             
         # =====================================================================
@@ -1148,7 +1166,6 @@ if menu == "Agenda Diaria Sillon":
         conn_historial = None
         try:
             conn_historial = conectar_db()
-            # Traemos todos los ingresos del día de hoy asentados en el sistema
             query_ingresos = """
                 SELECT i.id_ingreso, p.nombre AS paciente, i.monto, i.fecha 
                 FROM ingresos i
@@ -1159,12 +1176,10 @@ if menu == "Agenda Diaria Sillon":
             df_ingresos = pd.read_sql(query_ingresos, conn_historial)
             
             if not df_ingresos.empty:
-                # Formateamos las columnas para que se vean profesionales
                 df_ingresos['monto'] = df_ingresos['monto'].apply(lambda x: f"${x:,.2f}")
                 df_ingresos['fecha'] = pd.to_datetime(df_ingresos['fecha']).dt.strftime('%H:%M:%S')
                 df_ingresos.columns = ["ID Ingreso", "Paciente", "Monto Recaudado", "Hora de Pago"]
                 
-                # Mostramos el total acumulado en una tarjeta métrica limpia
                 conn_total = conectar_db()
                 with conn_total.cursor() as cur_t:
                     cur_t.execute("SELECT SUM(monto) FROM ingresos WHERE DATE(fecha) = CURDATE()")
@@ -1177,11 +1192,10 @@ if menu == "Agenda Diaria Sillon":
                 st.warning("📭 Aún no se han registrado cobros ni entradas de dinero el día de hoy.")
                 
         except Exception as e_hist:
-            st.caption(f"Nota de auditoría: Crea la tabla 'ingresos' en tu BD para activar el reporte visual diario. ({e_hist})")
+            st.error(f"Error al cargar el historial de caja: {e_hist}")
         finally:
             if conn_historial: 
-                conn_historial.close()      
-
+                conn_historial.close()
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
     st.subheader("📅 Programar Tratamiento / Consulta")
