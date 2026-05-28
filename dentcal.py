@@ -992,6 +992,7 @@ if menu == "Agenda Diaria Sillon":
                             st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
                     st.write("")
     
+    
 # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
 
     with tab_facturacion:
@@ -1073,8 +1074,7 @@ if menu == "Agenda Diaria Sillon":
                 
                 c_down, c_wa, c_em = st.columns(3)
                 with c_down:
-                    # SOLUCIÓN DE RAÍZ: Generamos el PDF codificado en base64 para descargarlo mediante HTML nativo
-                    import b64uuid
+                    # SOLUCIÓN DE RAÍZ: Quitamos b64uuid. Usamos solo base64 estándar de Python.
                     import base64
                     from reportlab.lib.pagesizes import letter
                     from reportlab.platypus import SimpleDocTemplate, Paragraph
@@ -1101,7 +1101,7 @@ if menu == "Agenda Diaria Sillon":
                         doc.build(story)
                         pdf_bytes = buffer.getvalue()
                         
-                        # Convertimos a base64 para inyectarlo en el botón HTML
+                        # Convertimos a base64 de manera limpia y nativa
                         b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
                         nombre_archivo = f"Recibo_Cita_{id_cita_sel}.pdf"
                         
@@ -1173,7 +1173,7 @@ if menu == "Agenda Diaria Sillon":
                 st.warning("📭 Aún no se han registrado cobros ni entradas de dinero el día de hoy.")
                 
         except Exception as e_hist:
-            st.caption("Historial temporalmente en espera de transacciones.")
+            st.caption("Historial en espera de transacciones.")
         finally:
             if conn_historial: 
                 conn_historial.close()
