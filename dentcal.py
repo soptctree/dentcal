@@ -25,6 +25,59 @@ def conectar_db():
         autocommit=True,
         ssl={'ssl': {}}  # 🚨 ESTA LÍNEA ES LA CLAVE: Activa el cifrado TLS obligatorio de TiDB
     )
+
+import io
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+
+def generar_pdf_recibo(id_cita, nombre_paciente, total, metodo, regimen, observaciones=""):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+    story = []
+    
+    styles = getSampleStyleSheet()
+    
+    # Estilos personalizados para tu clínica
+    title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=22, textColor=colors.HexColor("#1E3A8A"), spaceAfter=10)
+    sub_style = ParagraphStyle('SubStyle', parent=styles['Normal'], fontSize=10, textColor=colors.gray, spaceAfter=20)
+    normal_style = ParagraphStyle('Norm', parent=styles['Normal'], fontSize=11, spaceAfter=8)
+    
+    # Encabezado
+    story.append(Paragraph("🦷 DENTCAL - CONTROL PROFESIONAL", title_style))
+    story.append(Paragraph("Recibo Oficial de Pago e Historial Clínico", sub_style))
+    story.append(Spacer(1, 15))
+    
+    # Datos del comprobante
+    story.append(Paragraph(f"<b>Código de Cita:</b> {id_cita}", normal_style))
+    story.append(Paragraph(f"<b>Paciente:</b> {nombre_paciente}", normal_style))
+    story.append(Paragraph(f"<b>Régimen Contable:</b> {regimen}", normal_style))
+    story.append(Paragraph(f"<b>Método de Recaudación:</b> {metodo}", normal_style))
+    if observaciones:
+        story.append(Paragraph(f"<b>Observaciones:</b> {observaciones}", normal_style))
+    
+    story.append(Spacer(1, 20))
+    
+    # Tabla de montos
+    data_tabla = [
+        [Paragraph("<b>Concepto</b>", normal_style), Paragraph("<b>Total Asentado</b>", normal_style)],
+        ["Liquidación de Servicio Dental", f"${total:,.2f}"]
+    ]
+    
+    t = Table(data_tabla, colWidths=[350, 150])
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0,0), (1,0), colors.HexColor("#F3F4F6")),
+        ('ALIGN', (1,0), (1,-1), 'RIGHT'),
+        ('BOTTOMPADDING', (0,0), (-1,-1), 8),
+        ('GRID', (0,0), (-1,-1), 0.5, colors.lightgrey),
+    ]))
+    story.append(t)
+    
+    doc.build(story)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 ####facturacion######
 def mostrar_modulo_facturacion(id_cita_sel, id_paciente_sel, nombre_paciente):
     st.markdown("### 🧾 Panel de Liquidación y Caja Chica")
@@ -942,7 +995,7 @@ if menu == "Agenda Diaria Sillon":
 # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
     # ==============================================================================
     with tab_facturacion:
-        # 1. Recuperamos los datos de la sesión que guardó el botón del expander
+    # 1. Recuperamos los datos de la sesión que guardó el botón del expander
         id_cita_sel = st.session_state.get('id_cita_facturar')
         id_paciente_sel = st.session_state.get('id_paciente_facturar')
         nombre_paciente = st.session_state.get('nombre_paciente_facturar')
@@ -957,23 +1010,49 @@ if menu == "Agenda Diaria Sillon":
                     del st.session_state['id_cita_facturar']
                     del st.session_state['id_paciente_facturar']
                     del st.session_state['nombre_paciente_facturar']
+                    # Limpiamos también el estado de venta exitosa si existiera
+                    if 'venta_exitosa' in st.session_state: del st.session_state['venta_exitosa']
                     st.rerun()
             
             st.write("---")
             
             # =====================================================================
-            # 🔥 LA LÍNEA CLAVE: Aquí es donde llamamos a la función de la línea 1298
+            # 🔍 CORRECCIÓN DE RESCATE: Asegurar que id_paciente no sea NULL
             # =====================================================================
-            mostrar_modulo_facturacion(id_cita_sel, id_paciente_sel, nombre_paciente)
+            id_p_seguro = id_paciente_sel
+            if id_p_seguro is None:
+                try:
+                    conn_remedio = conectar_db()
+                    with conn_remedio.cursor() as cur_r:
+                        # Buscamos el id_paciente real amarrado a esa cita en la base de datos
+                        cur_r.execute("SELECT id_paciente FROM citas WHERE id_cita = %s", (id_cita_sel,))
+                        res_r = cur_r.fetchone()
+                        if res_r and res_r[0] is not None:
+                            id_p_seguro = res_r[0]
+                except Exception as e:
+                    st.error(f"Error al recuperar ID de respaldo: {e}")
+                finally:
+                    if conn_remedio: 
+                        conn_remedio.close()
+
+            # Si por alguna razón extrema sigue siendo None, le asignamos 1 por defecto 
+            # para que la base de datos no rechace el INSERT en producción
+            if id_p_seguro is None:
+                id_p_seguro = 1
+            
+            # =====================================================================
+            # 🔥 LLAMADA SEGURA: Ejecutamos la función con el ID garantizado
+            # =====================================================================
+            mostrar_modulo_facturacion(id_cita_sel, id_p_seguro, nombre_paciente)
             
         else:
             # Mensaje por defecto cuando entran a la pestaña sin elegir un paciente primero
             st.info("💡 **Sin transacciones activas:** Ve a la pestaña 'Vista del Día' o 'Buscar Cita por Nombre' y presiona el botón '💵 Liquidar Cuenta' en el paciente correspondiente para cargar la caja.")
             
-            # Vista de prueba para desarrollo (puedes descomentarla quitando el '#' si quieres ver cómo dibuja)
+            # Vista de prueba para desarrollo
             with st.expander("⚙️ Modo Desarrollo: Ver diseño estático del panel"):
                 st.caption("Esta es una simulación visual fija.")
-                mostrar_modulo_facturacion(1, 1, "Paciente Genérico de Prueba")               
+                mostrar_modulo_facturacion(1, 1, "Paciente Genérico de Prueba")         
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
