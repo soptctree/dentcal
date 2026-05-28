@@ -475,11 +475,76 @@ elif menu == "Agendar Cita Dental":
     if df_p.empty: 
         st.warning("Debe registrar un paciente primero.")
     else:
+        # --- VISUALIZADOR RÁPIDO DE HORAS LIBRES INCORPORADO ---
+        # Colocamos un selector de fecha fuera del formulario para que actualice dinámicamente la disponibilidad
+        st.write("### 🔍 Consultar Disponibilidad de Horarios")
+        fecha_consulta = st.date_input("Selecciona una fecha para ver espacios libres:", value=datetime.now(), key="fecha_consulta_rapida")
+        
+        # Consultamos las citas activas para esa fecha de forma síncrona
+        fecha_consulta_str = fecha_consulta.strftime("%Y-%m-%d")
+        conn_ver = conectar_db()
+        df_ver_activas = pd.DataFrame()
+        try:
+            query_ver = """
+                SELECT hora_inicio, hora_fin FROM citas 
+                WHERE fecha = %s AND estado != 'Cancelada'
+            """
+            df_ver_activas = pd.read_sql(query_ver, conn_ver, params=[fecha_consulta_str])
+        except Exception as e:
+            st.error(f"Error al verificar agenda: {e}")
+        finally:
+            if conn_ver:
+                conn_ver.close()
+
+        # Construimos el acordeón desplegable con el estado de las horas
+        with st.expander(f"📋 Ver Agenda y Espacios del día: {fecha_consulta.strftime('%d-%m-%Y')}", expanded=False):
+            horas_base = range(7, 18)  # De 7 AM a 5 PM
+            
+            # Formateamos una lista limpia de estados en texto legible
+            st.write("**Resumen de las horas del día:**")
+            
+            # Generamos columnas compactas internas para no ocupar mucho espacio vertical
+            sub_cols = st.columns(4)
+            for idx_h, hora in enumerate(horas_base):
+                estados_cuartos = []
+                ultimo_bloque_ocupado = None
+                
+                for cuarto in [0, 15, 30, 45]:
+                    bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
+                    bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
+                    
+                    ocupado = False
+                    if not df_ver_activas.empty:
+                        for _, r in df_ver_activas.iterrows():
+                            inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                            fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
+                            if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
+                                ocupado = True
+                                break
+                    estados_cuartos.append(1 if ocupado else 0)
+                
+                cuartos_ocupados = sum(estados_cuartos)
+                if cuartos_ocupados == 4:
+                    txt_status = "🔴 Ocupado"
+                elif cuartos_ocupados == 0:
+                    txt_status = "🟢 Libre"
+                else:
+                    txt_status = "🟡 Parcial"
+                
+                with sub_cols[idx_h % 4]:
+                    st.caption(f"**{hora:02d}:00** -> {txt_status}")
+
+        st.divider()
+
+        # --- FORMULARIO DE REGISTRO ---
+        st.write("### 📝 Datos de la Nueva Cita")
         with st.form("form_agendar", clear_on_submit=True):
             p_id = st.selectbox("Paciente", options=df_p['id_paciente'].tolist(),
                                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
+            
             c1, c2, c3 = st.columns(3)
-            fecha = c1.date_input("Fecha de la Cita")
+            # Enlazamos el input del formulario con la fecha seleccionada arriba para mantener concordancia
+            fecha = c1.date_input("Fecha de la Cita", value=fecha_consulta)
             h_i = c2.time_input("Hora Inicio", value=time(8,0))
             h_f = c3.time_input("Hora Fin", value=time(8,30))
             
@@ -487,8 +552,6 @@ elif menu == "Agendar Cita Dental":
                 if h_i >= h_f:
                     st.error("La hora de fin debe ser posterior a la de inicio.")
                 else:
-                    # Asumiendo que verificar_disponibilidad devuelve True si está LIBRE
-                    # Si devuelve True si está OCUPADO, cambia a: if not verificar_disponibilidad(fecha, h_i, h_f):
                     esta_disponible = verificar_disponibilidad(fecha, h_i, h_f)
                     
                     if not esta_disponible:
@@ -504,11 +567,13 @@ elif menu == "Agendar Cita Dental":
                             """
                             cursor.execute(sql, (p_id, fecha, h_i, h_f))
                             cursor.close()
+                            # Guardamos cambios reales en la base de datos
+                            conn.commit()
                             conn.close()
                             
-                            st.success("✅ ¡Cita dental reservada correctamente!")
-                            st.balloons()
-                            t_sleep.sleep(1.5)
+                            # MENSAJE DE CONFIRMACIÓN CLÍNICO (Sin animaciones infantiles)
+                            st.success(f"⚖ **Registro Exitoso:** La cita para el paciente ha sido asentada de forma permanente en la nube el día {fecha.strftime('%d-%m-%Y')} de {h_i.strftime('%H:%M')} a {h_f.strftime('%H:%M')}.")
+                            t_sleep.sleep(2.0)
                             st.rerun()
                             
                         except Exception as e:
