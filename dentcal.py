@@ -437,20 +437,16 @@ if menu == "Agenda Diaria Sillon":
                     h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
                     time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
                     
-                    # Guardamos el estado actual para usarlo en la lógica
                     estado_actual = row['estado']
                     
                     with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({estado_actual})"):
                         st.write(f"**Cédula/ID:** {row['cedula']}")
                         
-                        # Contenedor dinámico para mensajes de error/éxito temporales
                         contenedor_mensaje = st.empty()
-                        
-                        # --- PARTE A: CONTROL DE ESTADOS (BLOQUEADO SI ESTÁ CANCELADA) ---
                         lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
                         
+                        # --- PARTE A: CONTROL DE ESTADOS (BLOQUEADO SI ESTÁ CANCELADA) ---
                         if estado_actual == "Cancelada":
-                            # Si ya está cancelada, se congela el selector para auditoría
                             st.selectbox("Actualizar estado:", ["Cancelada"], index=0, disabled=True, key=f"upd_{row['id_cita']}")
                         else:
                             idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
@@ -471,21 +467,30 @@ if menu == "Agenda Diaria Sillon":
                                     t_sleep.sleep(3)
                                     contenedor_mensaje.empty()
                                 else:
-                                    cursor = conn.cursor()
-                                    cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                    conn.commit()
-                                    contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
-                                    t_sleep.sleep(1)
-                                    st.rerun()
+                                    # SOLUCIÓN DE CONEXIÓN: Abrimos una conexión fresca y dedicada para la actualización
+                                    conn_accion = None
+                                    try:
+                                        conn_accion = conectar_db()
+                                        cursor_accion = conn_accion.cursor()
+                                        cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                        conn_accion.commit()
+                                        cursor_accion.close()
+                                        
+                                        contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                        t_sleep.sleep(1)
+                                        st.rerun()
+                                    except Exception as ex_db:
+                                        st.error(f"Error al actualizar el estado: {ex_db}")
+                                    finally:
+                                        if conn_accion:
+                                            conn_accion.close()
                         
                         # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
-                        # Se activa si la cita está Cancelada (Reprogramar) o Ausente/Pendiente (Trasladar por retraso)
                         if estado_actual in ["Cancelada", "Ausente", "Pendiente"]:
                             st.write("---")
                             tipo_accion = "🔄 Reprogramar Cita (Cancelada)" if estado_actual == "Cancelada" else "🕒 Trasladar Hora (Retraso/Ausente)"
                             st.write(f"**{tipo_accion}**")
                             
-                            # Campos de entrada para el nuevo horario
                             c1, c2, c3 = st.columns(3)
                             nueva_fecha = c1.date_input("Nueva Fecha", value=fecha_agenda, key=f"f_rep_{row['id_cita']}")
                             nueva_h_i = c2.time_input("Nueva Hora Inicio", value=h_i_obj, key=f"hi_rep_{row['id_cita']}")
@@ -495,8 +500,6 @@ if menu == "Agenda Diaria Sillon":
                                 if nueva_h_i >= nueva_h_f:
                                     contenedor_mensaje.error("❌ La hora de fin debe ser posterior a la de inicio.")
                                 else:
-                                    # Validamos disponibilidad en el nuevo horario seleccionado
-                                    # Nota: Si se queda en la misma fecha/hora no chocará consigo misma si原estado era Cancelada
                                     esta_disponible = verificar_disponibilidad(nueva_fecha, nueva_h_i, nueva_h_f)
                                     
                                     if not esta_disponible:
@@ -504,22 +507,28 @@ if menu == "Agenda Diaria Sillon":
                                         t_sleep.sleep(3)
                                         contenedor_mensaje.empty()
                                     else:
+                                        # SOLUCIÓN DE CONEXIÓN: Conexión dedicada para la reprogramación
+                                        conn_rep = None
                                         try:
-                                            cursor = conn.cursor()
-                                            # Al reprogramar, si estaba cancelada o ausente, volvemos el estado a 'Pendiente' en su nueva ubicación
+                                            conn_rep = conectar_db()
+                                            cursor_rep = conn_rep.cursor()
                                             sql_update = """
                                                 UPDATE citas 
                                                 SET fecha = %s, hora_inicio = %s, hora_fin = %s, estado = 'Pendiente' 
                                                 WHERE id_cita = %s
                                             """
-                                            cursor.execute(sql_update, (nueva_fecha, nueva_h_i, nueva_h_f, row['id_cita']))
-                                            conn.commit()
+                                            cursor_rep.execute(sql_update, (nueva_fecha, nueva_h_i, nueva_h_f, row['id_cita']))
+                                            conn_rep.commit()
+                                            cursor_rep.close()
                                             
                                             contenedor_mensaje.success(f"✅ Cita de {row['nombre']} reubicada con éxito a las {nueva_h_i.strftime('%H:%M')}.")
                                             t_sleep.sleep(1.5)
                                             st.rerun()
-                                        except Exception as e:
-                                            st.error(f"Error al trasladar la cita: {e}")       
+                                        except Exception as ex_rep:
+                                            st.error(f"Error al trasladar la cita: {ex_rep}")
+                                        finally:
+                                            if conn_rep:
+                                                conn_rep.close()       
 
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE (SIN GRÁFICAS)
