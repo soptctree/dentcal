@@ -997,6 +997,8 @@ if menu == "Agenda Diaria Sillon":
 # ==============================================================================
     # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
 # ==============================================================================
+# --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+# ==============================================================================
     with tab_facturacion:
         # 0. ASEGURAR EXISTENCIA DE LA TABLA INGRESOS EN TU BASE DE DATOS
         try:
@@ -1035,6 +1037,7 @@ if menu == "Agenda Diaria Sillon":
                     del st.session_state['nombre_paciente_facturar']
                     if 'venta_exitosa' in st.session_state: del st.session_state['venta_exitosa']
                     if 'pdf_bytes' in st.session_state: del st.session_state['pdf_bytes']
+                    if 'monto_final_fijado' in st.session_state: del st.session_state['monto_final_fijado']
                     st.rerun()
             
             st.write("---")
@@ -1071,7 +1074,12 @@ if menu == "Agenda Diaria Sillon":
             st.write("---")
             st.markdown("### 🖨️ Finalizar Transacción y Emitir Comprobante")
             
-            monto_a_cobrar = st.session_state.get('monto_calculado_neto', 305.00) 
+            # Rescate dinámico del monto: si la función maestra no guardó el neto en session_state,
+            # intentamos usar el del balance visual (ej. 305.00) pero guardándolo persistentemente
+            if 'monto_final_fijado' not in st.session_state:
+                st.session_state['monto_final_fijado'] = st.session_state.get('monto_calculado_neto', 305.00)
+                
+            monto_a_cobrar = st.session_state['monto_final_fijado']
             
             # Verificamos si no se ha asentado el pago todavía para mostrar el botón de confirmación
             if not st.session_state.get('venta_exitosa'):
@@ -1123,25 +1131,47 @@ if menu == "Agenda Diaria Sillon":
                     finally:
                         if 'conn' in locals() and conn: conn.close()
 
-            # Si el pago ya fue asentado con éxito y tenemos bytes válidos, mostramos las opciones
+            # Si el pago ya fue asentado con éxito, mostramos las opciones de entrega de manera persistente
             if st.session_state.get('venta_exitosa'):
-                st.info("✅ Pago asentado. Elige cómo deseas entregar el recibo:")
+                st.info("✅ Pago asentado con éxito. Elige el medio de entrega del comprobante:")
                 
-                # Obtenemos los bytes de respaldo o creamos unos mínimos si se perdieron en la recarga
                 bytes_comprobante = st.session_state.get('pdf_bytes', b"")
                 
                 c_down, c_wa, c_em = st.columns(3)
                 with c_down:
-                    if len(bytes_comprobante) > 0:
-                        st.download_button(
-                            label="📥 Descargar PDF para Imprimir",
-                            data=bytes_comprobante,
-                            fileName=f"Recibo_{id_cita_sel}_{nombre_paciente.replace(' ', '_')}.pdf",
-                            mime="application/pdf",
-                            use_container_width=True
-                        )
-                    else:
-                        st.caption("⚠️ Error al recuperar el archivo PDF.")
+                    # Si por alguna recarga agresiva de Streamlit se limpiaron los bytes, los regeneramos en caliente
+                    if not bytes_comprobante:
+                        from reportlab.lib.pagesizes import letter
+                        from reportlab.platypus import SimpleDocTemplate, Paragraph
+                        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                        from reportlab.lib import colors
+                        import io
+                        from datetime import datetime
+
+                        b_fallback = io.BytesIO()
+                        d_f = SimpleDocTemplate(b_fallback, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+                        s_f = []
+                        styles_f = getSampleStyleSheet()
+                        title_s = ParagraphStyle('TStyle', parent=styles_f['Heading1'], fontSize=22, textColor=colors.HexColor("#1E3A8A"), spaceAfter=10)
+                        norm_s = ParagraphStyle('NStyle', parent=styles_f['Normal'], fontSize=11, spaceAfter=8)
+                        
+                        s_f.append(Paragraph("🦷 DENTCAL - CONTROL PROFESIONAL", title_s))
+                        s_f.append(Paragraph(f"<b>Recibo de Pago - Cita #{id_cita_sel}</b>", norm_s))
+                        s_f.append(Paragraph(f"<b>Paciente:</b> {nombre_paciente}", norm_s))
+                        s_f.append(Paragraph(f"<b>Monto Neto Recaudado:</b> ${monto_a_cobrar:,.2f}", norm_s))
+                        s_f.append(Paragraph(f"<b>Fecha de Emisión:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", norm_s))
+                        d_f.build(s_f)
+                        b_fallback.seek(0)
+                        bytes_comprobante = b_fallback.getvalue()
+                        st.session_state['pdf_bytes'] = bytes_comprobante
+
+                    st.download_button(
+                        label="📥 Descargar PDF para Imprimir",
+                        data=bytes_comprobante,
+                        fileName=f"Recibo_{id_cita_sel}_{nombre_paciente.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
                         
                 with c_wa:
                     import urllib.parse
@@ -1162,6 +1192,7 @@ if menu == "Agenda Diaria Sillon":
                     del st.session_state['nombre_paciente_facturar']
                     del st.session_state['venta_exitosa']
                     if 'pdf_bytes' in st.session_state: del st.session_state['pdf_bytes']
+                    if 'monto_final_fijado' in st.session_state: del st.session_state['monto_final_fijado']
                     st.rerun()
 
         else:
