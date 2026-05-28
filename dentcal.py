@@ -657,18 +657,20 @@ if menu == "Agenda Diaria Sillon":
                 
                 # --- PARTE A: CONTROL DE ESTADOS CON CANDADO DE INMUTABILIDAD ---
                 if estado_actual in ["Cancelada", "Ausente", "Liquidada"]:
-                    # Mensajes personalizados de bloqueo según el estado inmutable
                     if estado_actual == "Liquidada":
                         st.success("🔒 **Registro Cerrado:** Esta cita ya fue cobrada y asentada en caja. No admite cambios.")
                     elif estado_actual == "Ausente":
-                        st.error("🔒 **Registro Cerrado:** Paciente marcado como Ausente. No se permite volver a editar.")
+                        # Validamos si hubo retención de dinero en este registro cerrado
+                        anticipo_ret = row.get('anticipo_retenido', 0.0)
+                        if anticipo_ret > 0:
+                            st.error(f"🔒 **Paciente Ausente:** Se penalizó al paciente reteniendo C$ {anticipo_ret:.2f} del anticipo en Caja Chica.")
+                        else:
+                            st.error("🔒 **Registro Cerrado:** Paciente marcado como Ausente. Sin anticipos que penalizar.")
                     elif estado_actual == "Cancelada":
                         st.warning("🔒 **Registro Cerrado:** Cita Cancelada. No se permite volver a editar.")
                     
-                    # Selectbox bloqueado mostrando el estado fijo
                     st.selectbox("Estado del Turno:", [estado_actual], index=0, disabled=True, key=f"upd_{row['id_cita']}")
                     
-                    # Si está Liquidada, podrías opcionalmente dar acceso directo a ver/reimprimir factura en la otra pestaña
                     if estado_actual == "Liquidada":
                         if st.button("🖨️ Ver Factura en Caja", key=f"liq_locked_{row['id_cita']}", use_container_width=True):
                             st.session_state['id_cita_facturar'] = row['id_cita']
@@ -676,10 +678,33 @@ if menu == "Agenda Diaria Sillon":
                             st.session_state['nombre_paciente_facturar'] = row['nombre']
                             st.rerun()
                 else:
-                    # Flujo activo únicamente para "Pendiente" o "Asistió"
+                    # --- FLUJO ACTIVO: PENDIENTE O ASISTIÓ ---
                     idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
                     nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
                     
+                    # ENTRADA DE ANTICIPO: Se habilita únicamente si la cita aún está 'Pendiente'
+                    anticipo_actual = float(row.get('anticipo', 0.0))
+                    if estado_actual == "Pendiente":
+                        nuevo_anticipo = st.number_input(
+                            "Registrar Anticipo / Adelanto (C$):", 
+                            min_value=0.0, 
+                            value=anticipo_actual, 
+                            step=50.0, 
+                            key=f"anti_{row['id_cita']}"
+                        )
+                    else:
+                        # Si ya está en 'Asistió', solo mostramos de forma informativa cuánto dejó
+                        st.info(f"💰 Este paciente cuenta con un anticipo registrado de: C$ {anticipo_actual:.2f}")
+                        nuevo_anticipo = anticipo_actual
+
+                    # Si el usuario selecciona 'Ausente' y el paciente tenía dinero abonado, desplegamos la regla de penalización
+                    porcentaje_retencion = 0
+                    if nuevo_estado == "Ausente" and anticipo_actual > 0:
+                        st.warning(f"⚠️ El paciente abonó C$ {anticipo_actual:.2f}. Aplica penalización por inasistencia:")
+                        porcentaje_retencion = st.slider("Porcentaje a retener para la clínica (%):", 0, 100, 50, key=f"p_ret_{row['id_cita']}")
+                        monto_a_retener = (anticipo_actual * porcentaje_retencion) / 100
+                        st.info(f"Se ingresarán C$ {monto_a_retener:.2f} a Caja Chica y se deberán devolver C$ {anticipo_actual - monto_a_retener:.2f} al paciente.")
+
                     col_btn_guardar, col_btn_liquidar = st.columns(2)
                     
                     with col_btn_guardar:
@@ -688,90 +713,46 @@ if menu == "Agenda Diaria Sillon":
                             fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
                             momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
                             
-                            # REGLA DEL PAPEL: No permitir 'Asistió' antes de tiempo
                             if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza a las {h_i_obj.strftime('%H:%M')}.")
-                                t_sleep.sleep(3)
+                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado.")
+                                t_sleep.sleep(2)
                                 contenedor_mensaje.empty()
                             else:
                                 conn_accion = None
                                 try:
                                     conn_accion = conectar_db()
                                     cursor_accion = conn_accion.cursor()
-                                    cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                    
+                                    # Caso A: El usuario decide penalizar la ausencia en este momento
+                                    if nuevo_estado == "Ausente" and anticipo_actual > 0:
+                                        monto_penalizado = (anticipo_actual * porcentaje_retencion) / 100
+                                        # Actualizamos la cita fijando lo retenido
+                                        cursor_accion.execute(
+                                            "UPDATE citas SET estado = %s, anticipo_retenido = %s WHERE id_cita = %s",
+                                            (nuevo_estado, monto_penalizado, row['id_cita'])
+                                        )
+                                        # Opcional: Inyectar directamente a tu tabla contable de ingresos el dinero penalizado
+                                        cursor_accion.execute(
+                                            "INSERT INTO ingresos (id_cita, id_paciente, monto, concepto, fecha) VALUES (%s, %s, %s, 'Penalización por Ausencia', NOW())",
+                                            (row['id_cita'], row.get('id_paciente'), monto_penalizado)
+                                        )
+                                    else:
+                                        # Caso B: Actualización estándar de estado y/o registro de anticipo inicial
+                                        cursor_accion.execute(
+                                            "UPDATE citas SET estado = %s, anticipo = %s WHERE id_cita = %s",
+                                            (nuevo_estado, nuevo_anticipo, row['id_cita'])
+                                        )
+                                        
                                     conn_accion.commit()
                                     cursor_accion.close()
                                     
-                                    contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                    contenedor_mensaje.success("Datos guardados correctamente.")
                                     t_sleep.sleep(1)
                                     st.rerun()
                                 except Exception as ex_db:
-                                    st.error(f"Error al actualizar el estado: {ex_db}")
+                                    st.error(f"Error al actualizar la cita: {ex_db}")
                                 finally:
-                                    if conn_accion:
-                                        conn_accion.close()
-                    
-                    with col_btn_liquidar:
-                        # REGLA DEL PAPEL: El botón de Cobrar se habilita EXCLUSIVAMENTE si ya está guardado como "Asistió"
-                        if estado_actual == "Asistió":
-                            if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", type="primary", use_container_width=True):
-                                st.session_state['id_cita_facturar'] = row['id_cita']
-                                st.session_state['id_paciente_facturar'] = row.get('id_paciente', None)
-                                st.session_state['nombre_paciente_facturar'] = row['nombre']
-                                st.rerun()
-                        else:
-                            st.button(
-                                "💵 Cobrar / Liquidar", 
-                                key=f"liq_dis_{row['id_cita']}", 
-                                disabled=True, 
-                                use_container_width=True,
-                                help="Esta acción solo se habilita una vez que guardes el estado de la cita como 'Asistió'."
-                            )
-                
-                # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
-                # Modificado para que SOLO se muestre si la cita está en estado "Pendiente"
-                # Si está Cancelada, Ausente o Liquidada, se quita la reubicación para cumplir el diseño del papel
-                if estado_actual == "Pendiente":
-                    st.write("---")
-                    st.write("**🕒 Trasladar Hora (Retraso)**")
-                    
-                    c1, c2, c3 = st.columns(3)
-                    nueva_fecha = c1.date_input("Nueva Fecha", value=fecha_agenda, key=f"f_rep_{row['id_cita']}")
-                    nueva_h_i = c2.time_input("Nueva Hora Inicio", value=h_i_obj, key=f"hi_rep_{row['id_cita']}")
-                    nueva_h_f = c3.time_input("Nueva Hora Fin", value=h_f_obj, key=f"hf_rep_{row['id_cita']}")
-                    
-                    if st.button("Aplicar Reubicación Horaria", key=f"btn_rep_{row['id_cita']}", use_container_width=True):
-                        if nueva_h_i >= nueva_h_f:
-                            contenedor_mensaje.error("❌ La hora de fin debe ser posterior a la de inicio.")
-                        else:
-                            esta_disponible = verificar_disponibilidad(nueva_fecha, nueva_h_i, nueva_h_f)
-                            
-                            if not esta_disponible:
-                                contenedor_mensaje.error("❌ El horario destino seleccionado ya se encuentra ocupado por otra cita activa.")
-                                t_sleep.sleep(3)
-                                contenedor_mensaje.empty()
-                            else:
-                                conn_rep = None
-                                try:
-                                    conn_rep = conectar_db()
-                                    cursor_rep = conn_rep.cursor()
-                                    sql_update = """
-                                        UPDATE citas 
-                                        SET fecha = %s, hora_inicio = %s, hora_fin = %s, estado = 'Pendiente' 
-                                        WHERE id_cita = %s
-                                    """
-                                    cursor_rep.execute(sql_update, (nueva_fecha, nueva_h_i, nueva_h_f, row['id_cita']))
-                                    conn_rep.commit()
-                                    cursor_rep.close()
-                                    
-                                    contenedor_mensaje.success(f"✅ Cita de {row['nombre']} reubicada con éxito a las {nueva_h_i.strftime('%H:%M')}.")
-                                    t_sleep.sleep(1.5)
-                                    st.rerun()
-                                except Exception as ex_rep:
-                                    st.error(f"Error al trasladar la cita: {ex_rep}")
-                                finally:
-                                    if conn_rep:
-                                        conn_rep.close()
+                                    if conn_accion: conn_accion.close()
 
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE
@@ -1024,7 +1005,7 @@ if menu == "Agenda Diaria Sillon":
 # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
 
     with tab_facturacion:
-        # 0. ASEGURAR EXISTENCIA DE LA TABLA INGRESOS
+    # 0. ASEGURAR EXISTENCIA DE LA TABLA INGRESOS (CON COLUMNA CONCEPTO)
         try:
             conn_init = conectar_db()
             with conn_init.cursor() as cursor_init:
@@ -1034,6 +1015,7 @@ if menu == "Agenda Diaria Sillon":
                         id_cita INT NOT NULL,
                         id_paciente INT NOT NULL,
                         monto DECIMAL(10,2) NOT NULL,
+                        concepto VARCHAR(100) DEFAULT 'Saldo Liquidación Cita',
                         fecha DATETIME NOT NULL
                     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
                 """)
@@ -1072,8 +1054,31 @@ if menu == "Agenda Diaria Sillon":
             st.write("---")
             st.markdown("### 🖨️ Finalizar Transacción y Emitir Comprobante")
             
-            # Leemos el monto calculado final de tu balance contable
-            monto_a_cobrar = st.session_state.get('monto_calculado_neto', 305.00)
+            # --- 2. LEER EL ANTICIPO DESDE LA BASE DE DATOS EN TIEMPO REAL ---
+            anticipo_abonado = 0.0
+            try:
+                conn_f = conectar_db()
+                with conn_f.cursor() as cur_f:
+                    cur_f.execute("SELECT anticipo FROM citas WHERE id_cita = %s", (id_cita_sel,))
+                    res_f = cur_f.fetchone()
+                    if res_f:
+                        anticipo_abonado = float(res_f[0])
+            except Exception:
+                pass
+            finally:
+                if 'conn_f' in locals() and conn_f: conn_f.close()
+
+            # Leemos el monto bruto calculado final de tu balance contable
+            monto_base = st.session_state.get('monto_calculado_neto', 305.00)
+            
+            # Aplicamos el descuento contable si existe anticipo previo
+            if anticipo_abonado > 0:
+                st.warning(f"📉 **Descuento por Anticipo Aplicado:** - C$ {anticipo_abonado:.2f}")
+                monto_a_cobrar = max(0.0, monto_base - anticipo_abonado)
+            else:
+                monto_a_cobrar = monto_base
+
+            st.markdown(f"#### **Total Neto a Liquidar hoy en Caja:** C$ {monto_a_cobrar:.2f}")
             
             # Si no se ha asentado el pago, mostramos el botón de acción principal
             if not st.session_state.get('pago_exitoso'):
@@ -1081,12 +1086,15 @@ if menu == "Agenda Diaria Sillon":
                     try:
                         conn = conectar_db()
                         with conn.cursor() as cursor:
+                            # Insertamos el dinero real ingresado con su respectivo concepto
                             sql_insert = """
-                                INSERT INTO ingresos (id_cita, id_paciente, monto, fecha) 
-                                VALUES (%s, %s, %s, NOW())
+                                INSERT INTO ingresos (id_cita, id_paciente, monto, concepto, fecha) 
+                                VALUES (%s, %s, %s, 'Saldo Liquidación Cita', NOW())
                             """
                             cursor.execute(sql_insert, (id_cita_sel, id_p_seguro, monto_a_cobrar))
-                            cursor.execute("UPDATE citas SET estado = 'Asistió' WHERE id_cita = %s", (id_cita_sel,))
+                            
+                            # CAMBIO CLAVE: El estado pasa a 'Liquidada' para congelar el turno de por vida
+                            cursor.execute("UPDATE citas SET estado = 'Liquidada' WHERE id_cita = %s", (id_cita_sel,))
                         conn.commit()
                         
                         st.session_state['pago_exitoso'] = True
@@ -1096,20 +1104,18 @@ if menu == "Agenda Diaria Sillon":
                     finally:
                         if 'conn' in locals() and conn: conn.close()
             
-            # Si el pago ya fue asentado con éxito, liberamos las opciones de exportación de manera limpia
+            # Si el pago ya fue asentado con éxito, liberamos las opciones de exportación
             if st.session_state.get('pago_exitoso'):
                 st.info("🎉 ¡El pago ha sido registrado con éxito en el sistema!")
                 
                 c_down, c_wa, c_em = st.columns(3)
                 with c_down:
-                    # SOLUCIÓN DE RAÍZ: Quitamos b64uuid. Usamos solo base64 estándar de Python.
                     import base64
                     from reportlab.lib.pagesizes import letter
                     from reportlab.platypus import SimpleDocTemplate, Paragraph
                     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
                     from reportlab.lib import colors
                     import io
-                    from datetime import datetime
 
                     try:
                         buffer = io.BytesIO()
@@ -1123,13 +1129,14 @@ if menu == "Agenda Diaria Sillon":
                         story.append(Paragraph("🦷 DENTCAL - CONTROL PROFESIONAL", title_style))
                         story.append(Paragraph(f"<b>Recibo de Pago - Cita #{id_cita_sel}</b>", normal_style))
                         story.append(Paragraph(f"<b>Paciente:</b> {nombre_paciente}", normal_style))
-                        story.append(Paragraph(f"<b>Monto Neto Recaudado:</b> ${monto_a_cobrar:,.2f}", normal_style))
+                        story.append(Paragraph(f"<b>Monto Neto Recaudado:</b> C$ {monto_a_cobrar:,.2f}", normal_style))
+                        if anticipo_abonado > 0:
+                            story.append(Paragraph(f"<b>Anticipo Aplicado:</b> C$ {anticipo_abonado:,.2f}", normal_style))
                         story.append(Paragraph(f"<b>Fecha de Emisión:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", normal_style))
                         
                         doc.build(story)
                         pdf_bytes = buffer.getvalue()
                         
-                        # Convertimos a base64 de manera limpia y nativa
                         b64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
                         nombre_archivo = f"Recibo_Cita_{id_cita_sel}.pdf"
                         
@@ -1146,14 +1153,14 @@ if menu == "Agenda Diaria Sillon":
                 
                 with c_wa:
                     import urllib.parse
-                    texto_wa = f"Hola {nombre_paciente}, confirmamos el pago de tu consulta por ${monto_a_cobrar:,.2f}. ¡Muchas gracias!"
+                    texto_wa = f"Hola {nombre_paciente}, confirmamos el pago de tu consulta por C$ {monto_a_cobrar:,.2f}. ¡Muchas gracias!"
                     url_wa = f"https://wa.me/?text={urllib.parse.quote(texto_wa)}"
                     st.markdown(f'<a href="{url_wa}" target="_blank"><button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">💬 Enviar WhatsApp</button></a>', unsafe_allow_html=True)
                     
                 with c_em:
                     import urllib.parse
                     asunto_m = f"Comprobante DentCal - Cita #{id_cita_sel}"
-                    cuerpo_m = f"Estimado/a {nombre_paciente},\n\nConfirmamos su pago de ${monto_a_cobrar:,.2f}.\n\nSaludos."
+                    cuerpo_m = f"Estimado/a {nombre_paciente},\n\nConfirmamos su pago de C$ {monto_a_cobrar:,.2f}.\n\nSaludos."
                     url_m = f"mailto:?subject={urllib.parse.quote(asunto_m)}&body={urllib.parse.quote(cuerpo_m)}"
                     st.markdown(f'<a href="{url_m}"><button style="width:100%; height:38px; background-color:#EA4335; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">✉️ Enviar Correo</button></a>', unsafe_allow_html=True)
                 
@@ -1177,8 +1184,9 @@ if menu == "Agenda Diaria Sillon":
         conn_historial = None
         try:
             conn_historial = conectar_db()
+            # SELECT modificado para extraer la nueva columna de conceptos
             query_ingresos = """
-                SELECT i.id_ingreso, p.nombre AS paciente, i.monto, i.fecha 
+                SELECT i.id_ingreso, p.nombre AS paciente, i.monto, i.concepto, i.fecha 
                 FROM ingresos i
                 JOIN pacientes p ON i.id_paciente = p.id_paciente
                 WHERE DATE(i.fecha) = CURDATE()
@@ -1187,15 +1195,16 @@ if menu == "Agenda Diaria Sillon":
             df_ingresos = pd.read_sql(query_ingresos, conn_historial)
             
             if not df_ingresos.empty:
-                df_ingresos['monto'] = df_ingresos['monto'].apply(lambda x: f"${x:,.2f}")
+                df_ingresos['monto'] = df_ingresos['monto'].apply(lambda x: f"C$ {x:,.2f}")
                 df_ingresos['fecha'] = pd.to_datetime(df_ingresos['fecha']).dt.strftime('%H:%M:%S')
-                df_ingresos.columns = ["ID Ingreso", "Paciente", "Monto Recaudado", "Hora de Pago"]
+                # Mapeo de columnas ajustado incluyendo el campo "Concepto"
+                df_ingresos.columns = ["ID Ingreso", "Paciente", "Monto Recaudado", "Concepto", "Hora de Pago"]
                 
                 with conn_historial.cursor() as cur_t:
                     cur_t.execute("SELECT SUM(monto) FROM ingresos WHERE DATE(fecha) = CURDATE()")
                     total_dia = cur_t.fetchone()[0] or 0.0
                 
-                st.metric(label="💰 Total Recaudado en Caja Hoy", value=f"${total_dia:,.2f}")
+                st.metric(label="💰 Total Recaudado en Caja Hoy", value=f"C$ {total_dia:,.2f}")
                 st.dataframe(df_ingresos, use_container_width=True)
             else:
                 st.warning("📭 Aún no se han registrado cobros ni entradas de dinero el día de hoy.")
@@ -1214,7 +1223,6 @@ elif menu == "Agendar Cita Dental":
         st.warning("Debe registrar un paciente primero.")
     else:
         # --- VISUALIZADOR RÁPIDO DE HORAS LIBRES INCORPORADO ---
-        # Colocamos un selector de fecha fuera del formulario para que actualice dinámicamente la disponibilidad
         st.write("### 🔍 Consultar Disponibilidad de Horarios")
         fecha_consulta = st.date_input("Selecciona una fecha para ver espacios libres:", value=datetime.now(), key="fecha_consulta_rapida")
         
@@ -1237,16 +1245,11 @@ elif menu == "Agendar Cita Dental":
         # Construimos el acordeón desplegable con el estado de las horas
         with st.expander(f"📋 Ver Agenda y Espacios del día: {fecha_consulta.strftime('%d-%m-%Y')}", expanded=False):
             horas_base = range(7, 18)  # De 7 AM a 5 PM
-            
-            # Formateamos una lista limpia de estados en texto legible
             st.write("**Resumen de las horas del día:**")
             
-            # Generamos columnas compactas internas para no ocupar mucho espacio vertical
             sub_cols = st.columns(4)
             for idx_h, hora in enumerate(horas_base):
                 estados_cuartos = []
-                ultimo_bloque_ocupado = None
-                
                 for cuarto in [0, 15, 30, 45]:
                     bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
                     bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
@@ -1280,16 +1283,21 @@ elif menu == "Agendar Cita Dental":
             p_id = st.selectbox("Paciente", options=df_p['id_paciente'].tolist(),
                                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
             
-            c1, c2, c3 = st.columns(3)
-            # Enlazamos el input del formulario con la fecha seleccionada arriba para mantener concordancia
+            # Reorganizamos a 4 columnas para embonar estéticamente el campo de anticipo
+            c1, c2, c3, c4 = st.columns(4)
             fecha = c1.date_input("Fecha de la Cita", value=fecha_consulta)
             h_i = c2.time_input("Hora Inicio", value=time(8,0))
             h_f = c3.time_input("Hora Fin", value=time(8,30))
+            
+            # NUEVO CAMPO DE ANTICIPO/ADELANTO
+            anticipo_ini = c4.number_input("Anticipo (C$)", min_value=0.0, value=0.0, step=50.0, 
+                                           help="Registra si el paciente deja un abono previo para apartar el espacio.")
             
             if st.form_submit_button("Confirmar Espacio"):
                 if h_i >= h_f:
                     st.error("La hora de fin debe ser posterior a la de inicio.")
                 else:
+                    # Se mantiene intacta tu función de validación de horarios
                     esta_disponible = verificar_disponibilidad(fecha, h_i, h_f)
                     
                     if not esta_disponible:
@@ -1297,20 +1305,36 @@ elif menu == "Agendar Cita Dental":
                     else:
                         try:
                             conn = conectar_db()
-                            cursor = conn.cursor()
+                            with conn.cursor() as cursor:
+                                
+                                # 1. Insertamos la cita incluyendo la columna anticipo
+                                sql_cita = """
+                                    INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin, anticipo) 
+                                    VALUES (%s, %s, %s, %s, %s)
+                                """
+                                cursor.execute(sql_cita, (p_id, fecha, h_i, h_f, anticipo_ini))
+                                
+                                # Obtenemos el ID de la cita que se acaba de generar para amarrar el ingreso
+                                id_cita_nueva = cursor.lastrowid
+                                
+                                # 2. Validación Contable: Si dejó dinero, se asienta de inmediato en ingresos
+                                if anticipo_ini > 0:
+                                    sql_ingreso = """
+                                        INSERT INTO ingresos (id_cita, id_paciente, monto, concepto, fecha)
+                                        VALUES (%s, %s, %s, 'Anticipo/Abono de Cita Programada', NOW())
+                                    """
+                                    cursor.execute(sql_ingreso, (id_cita_nueva, p_id, anticipo_ini))
+                                
+                                cursor.close()
+                                conn.commit()
+                                conn.close()
                             
-                            sql = """
-                                INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) 
-                                VALUES (%s, %s, %s, %s)
-                            """
-                            cursor.execute(sql, (p_id, fecha, h_i, h_f))
-                            cursor.close()
-                            # Guardamos cambios reales en la base de datos
-                            conn.commit()
-                            conn.close()
-                            
-                            # MENSAJE DE CONFIRMACIÓN CLÍNICO (Sin animaciones infantiles)
-                            st.success(f"⚖ **Registro Exitoso:** La cita para el paciente ha sido asentada de forma permanente en la nube el día {fecha.strftime('%d-%m-%Y')} de {h_i.strftime('%H:%M')} a {h_f.strftime('%H:%M')}.")
+                            # MENSAJE DE CONFIRMACIÓN ADAPTADO
+                            msg_exito = f"⚖ **Registro Exitoso:** La cita ha sido asentada permanente en la nube el día {fecha.strftime('%d-%m-%Y')}."
+                            if anticipo_ini > 0:
+                                msg_exito += f" Se registró un abono inicial en caja de C$ {anticipo_ini:,.2f}."
+                                
+                            st.success(msg_exito)
                             t_sleep.sleep(2.0)
                             st.rerun()
                             
