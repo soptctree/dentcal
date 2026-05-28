@@ -260,7 +260,7 @@ if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True, type="seco
 if menu == "Agenda Diaria Sillon":
     st.subheader("📋 Control de Citas y Búsqueda")
     
-    # Creamos pestañas para organizar la Agenda del día y el nuevo Buscador
+    # Separamos limpiamente en dos pestañas
     tab_agenda, tab_buscador = st.tabs(["🕒 Vista del Día", "🔍 Buscar Cita por Nombre"])
 
     # ==========================================
@@ -290,63 +290,63 @@ if menu == "Agenda Diaria Sillon":
             st.metric(label="📅 Citas activas para este día", value=f"{total_citas_hoy} paciente(s)")
             st.write("") 
 
-            # --- CSS OPTIMIZADO PARA TARJETAS ---
-            css_bloques = """
-            <style>
-            .hour-container {
-                display: grid !important;
-                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
-                gap: 12px !important;
-                font-family: Arial, sans-serif;
-                margin-bottom: 25px;
-                width: 100%;
-            }
-            .hour-card {
-                padding: 14px 8px;
-                text-align: center;
-                border-radius: 8px;
-                font-weight: bold;
-                font-size: 13px;
-                box-shadow: 0px 2px 4px rgba(0,0,0,0.08);
-                color: #222222;
-            }
-            .card-disponible {
-                background-color: #DFF2BF; 
-                border: 1px solid #4F8A10; 
-                color: #4F8A10;
-            }
-            .card-ocupado {
-                background-color: #FFD2D2; 
-                border: 1px solid #D8000C; 
-                color: #D8000C;
-            }
-            .top-indicator {
-                display: block;
-                font-size: 11px;
-                font-weight: normal;
-                margin-bottom: 4px;
-                white-space: nowrap;
-                overflow: hidden;
-                text-overflow: ellipsis;
-            }
-            .time-label {
-                font-size: 16px;
-                display: block;
-                margin-top: 2px;
-            }
-            </style>
-            """
-            st.markdown(css_bloques, unsafe_allow_html=True)
+            # --- CSS INYECTADO CORRECTAMENTE ---
+            st.markdown("""
+                <style>
+                .hour-container {
+                    display: flex !important;
+                    flex-wrap: wrap !important;
+                    gap: 12px !important;
+                    font-family: Arial, sans-serif !important;
+                    margin-bottom: 25px !important;
+                    width: 100% !important;
+                }
+                .hour-card {
+                    flex: 1 1 180px !important;
+                    min-width: 160px !important;
+                    max-width: 220px !important;
+                    padding: 14px 8px !important;
+                    text-align: center !important;
+                    border-radius: 8px !important;
+                    font-weight: bold !important;
+                    font-size: 13px !important;
+                    box-shadow: 0px 2px 4px rgba(0,0,0,0.08) !important;
+                }
+                .card-disponible {
+                    background-color: #DFF2BF !important; 
+                    border: 1px solid #4F8A10 !important; 
+                    color: #4F8A10 !important;
+                }
+                .card-ocupado {
+                    background-color: #FFD2D2 !important; 
+                    border: 1px solid #D8000C !important; 
+                    color: #D8000C !important;
+                }
+                .top-indicator {
+                    display: block !important;
+                    font-size: 11px !important;
+                    font-weight: normal !important;
+                    margin-bottom: 4px !important;
+                    white-space: nowrap !important;
+                    overflow: hidden !important;
+                    text-overflow: ellipsis !important;
+                }
+                .time-label {
+                    font-size: 16px !important;
+                    display: block !important;
+                    margin-top: 2px !important;
+                }
+                </style>
+            """, unsafe_allow_html=True)
 
-            # RENDERIZADO DEL MAPA VISUAL (De 7:00 AM a 5:00 PM)
+            # CONSTRUCCIÓN DEL GRID HTML EN UNA SOLA CADENA DE TEXTO
             html_grid = "<div class='hour-container'>"
-            horas_base = range(7, 18)
+            horas_base = range(7, 18)  # De 7:00 AM a 5:00 PM
 
             for hora in horas_base:
                 bloque_inicio = time(hora, 0)
                 bloque_fin = time(hora + 1, 0) if hora < 23 else time(23, 59)
                 
-                ocupado = False
                 texto_tarjeta = "Disponible"
                 clase_css = "card-disponible"
                 
@@ -355,10 +355,9 @@ if menu == "Agenda Diaria Sillon":
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
-                        # Si la cita cruza o coincide con esta hora base
+                        # Comprobación si el bloque de hora interseca la cita
                         if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
-                            ocupado = True
-                            # NUEVO: Mostramos el nombre del paciente directamente en la tarjeta
+                            # NUEVO: Muestra el nombre asignado directamente en la tarjeta
                             texto_tarjeta = f"👤 {r['nombre']}"
                             clase_css = "card-ocupado"
                             break
@@ -371,15 +370,17 @@ if menu == "Agenda Diaria Sillon":
                 """
 
             html_grid += "</div>"
+            
+            # Renderizado seguro del HTML de las tarjetas
             st.markdown(html_grid, unsafe_allow_html=True)
             st.divider()
 
-            # --- CONTROL DE ASISTENCIA REVISADO ---
+            # --- CONTROL DE ASISTENCIA CON VALIDACIÓN EN ADELANTE ---
             st.write("### 📝 Control de Asistencia")
             if df_todas.empty:
                 st.info("No hay pacientes registrados para esta fecha.")
             else:
-                for _, row in df_todas.iterrows():
+                for idx, row in df_todas.iterrows():
                     h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
                     h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
                     time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
@@ -390,29 +391,28 @@ if menu == "Agenda Diaria Sillon":
                         lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
                         idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
                         
-                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
+                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}_{idx}")
                         
-                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
+                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}_{idx}"):
                             ahora = datetime.now()
                             fecha_cita = row['fecha'] if isinstance(row['fecha'], datetime) else datetime.strptime(str(row['fecha']), "%Y-%m-%d").date()
                             if isinstance(fecha_cita, datetime):
                                 fecha_cita = fecha_cita.date()
 
-                            # NUEVA LÓGICA DE ASISTENCIA: Estricta desde la fecha y hora exacta en adelante
+                            # VALIDACIÓN SOLICITADA: Solo desde la fecha y hora exacta en adelante
                             if nuevo_estado == "Asistió":
-                                momento_cita = datetime.combine(fecha_cita, h_i_obj)
+                                momento_exacto_cita = datetime.combine(fecha_cita, h_i_obj)
                                 
-                                if ahora < momento_cita:
-                                    st.error(f"❌ **Entrada denegada:** No puedes marcar asistencia antes de tiempo. La cita está programada para el **{fecha_cita.strftime('%d-%m-%Y')}** a las **{h_i_obj.strftime('%H:%M')}**.")
+                                if ahora < momento_exacto_cita:
+                                    st.error(f"❌ **Entrada denegada:** No puedes registrar asistencia antes de tiempo. La cita inicia el **{fecha_cita.strftime('%d-%m-%Y')}** a las **{h_i_obj.strftime('%H:%M')}**.")
                                 else:
-                                    # Si ya es la hora exacta o ya pasó, se permite guardar con éxito
                                     cursor = conn.cursor()
                                     cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                    st.success(f"✔ ¡Asistencia validada correctamente para {row['nombre']}!")
+                                    st.success(f"✔ ¡Asistencia marcada para {row['nombre']} con éxito!")
                                     t_sleep.sleep(1)
                                     st.rerun()
                             else:
-                                # Para otros estados (Ausente, Cancelada, Pendiente) no aplica la restricción de tiempo
+                                # Para cambiar a otros estados como Ausente o Cancelada no hay restricción horaria
                                 cursor = conn.cursor()
                                 cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
                                 st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
@@ -426,7 +426,7 @@ if menu == "Agenda Diaria Sillon":
                 conn.close()
 
     # ==========================================
-    # PESTAÑA 2: NUEVO BUSCADOR DE CITAS POR NOMBRE
+    # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE (SIN GRÁFICAS)
     # ==========================================
     with tab_buscador:
         st.write("### 🔍 Localizador de Citas Olvidadas")
@@ -434,7 +434,6 @@ if menu == "Agenda Diaria Sillon":
         
         if nombre_buscar:
             conn = conectar_db()
-            # Buscador con operador LIKE para encontrar nombres similares o parciales
             query_buscar = """
                 SELECT p.nombre, c.fecha, c.hora_inicio, c.hora_fin, c.estado
                 FROM citas c
@@ -447,20 +446,16 @@ if menu == "Agenda Diaria Sillon":
                 df_busqueda = pd.read_sql(query_buscar, conn, params=[search_term])
                 
                 if not df_busqueda.empty:
-                    st.success(f"🎉 Se encontraron {len(df_busqueda)} registros coincidentes:")
+                    st.success(f"🎉 Se encontraron {len(df_busqueda)} registros:")
                     
-                    # Formateamos las columnas para que el usuario las lea de manera bonita
                     df_visual = df_busqueda.copy()
                     df_visual['fecha'] = pd.to_datetime(df_visual['fecha']).dt.strftime('%d-%m-%Y')
                     
-                    # Convertir timedeltas/times a texto HH:MM estables
                     df_visual['hora_inicio'] = df_visual['hora_inicio'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
                     df_visual['hora_fin'] = df_visual['hora_fin'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
                     
-                    # Renombrar columnas para la tabla de cara al usuario
                     df_visual.columns = ["Paciente", "Fecha Programada", "Hora Inicio", "Hora Fin", "Estado Actual"]
                     
-                    # Mostrar los resultados en una tabla limpia de Streamlit
                     st.dataframe(df_visual, use_container_width=True)
                 else:
                     st.warning(f"❌ No se encontró ninguna cita registrada para: '{nombre_buscar}'")
@@ -470,7 +465,7 @@ if menu == "Agenda Diaria Sillon":
                 if conn:
                     conn.close()
         else:
-            st.info("💡 Introduce el nombre completo o parcial del paciente arriba para conocer qué días tiene cita asignados.")
+            st.info("💡 Escribe el nombre del paciente para ver qué día y a qué hora tiene citas asignadas en el sistema.")
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
