@@ -1218,6 +1218,24 @@ if menu == "Agenda Diaria Sillon":
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
     st.subheader("📅 Programar Tratamiento / Consulta")
+    
+    # =====================================================================
+    # 🛠️ PARCHE DE COMPATIBILIDAD PARA TiDB (TABLA INGRESOS -> CONCEPTO)
+    # =====================================================================
+    try:
+        conn_migra = conectar_db()
+        with conn_migra.cursor() as cur_migra:
+            # Forzamos la creación de la columna 'concepto' en la tabla ingresos si falta
+            cur_migra.execute("ALTER TABLE ingresos ADD COLUMN concepto VARCHAR(100) DEFAULT 'Saldo Liquidación Cita';")
+            conn_migra.commit()
+    except Exception:
+        # Si la columna ya existe, TiDB lanzará un error que capturamos aquí en silencio
+        pass
+    finally:
+        if 'conn_migra' in locals() and conn_migra:
+            conn_migra.close()
+    # =====================================================================
+
     df_p = obtener_pacientes()
     if df_p.empty: 
         st.warning("Debe registrar un paciente primero.")
@@ -1226,7 +1244,6 @@ elif menu == "Agendar Cita Dental":
         st.write("### 🔍 Consultar Disponibilidad de Horarios")
         fecha_consulta = st.date_input("Selecciona una fecha para ver espacios libres:", value=datetime.now(), key="fecha_consulta_rapida")
         
-        # Consultamos las citas activas para esa fecha de forma síncrona
         fecha_consulta_str = fecha_consulta.strftime("%Y-%m-%d")
         conn_ver = conectar_db()
         df_ver_activas = pd.DataFrame()
@@ -1242,9 +1259,8 @@ elif menu == "Agendar Cita Dental":
             if conn_ver:
                 conn_ver.close()
 
-        # Construimos el acordeón desplegable con el estado de las horas
         with st.expander(f"📋 Ver Agenda y Espacios del día: {fecha_consulta.strftime('%d-%m-%Y')}", expanded=False):
-            horas_base = range(7, 18)  # De 7 AM a 5 PM
+            horas_base = range(7, 18)
             st.write("**Resumen de las horas del día:**")
             
             sub_cols = st.columns(4)
@@ -1283,13 +1299,12 @@ elif menu == "Agendar Cita Dental":
             p_id = st.selectbox("Paciente", options=df_p['id_paciente'].tolist(),
                                format_func=lambda x: f"{df_p[df_p['id_paciente']==x]['nombre'].values[0]}")
             
-            # Reorganizamos a 4 columnas para embonar estéticamente el campo de anticipo
             c1, c2, c3, c4 = st.columns(4)
             fecha = c1.date_input("Fecha de la Cita", value=fecha_consulta)
             h_i = c2.time_input("Hora Inicio", value=time(8,0))
             h_f = c3.time_input("Hora Fin", value=time(8,30))
             
-            # NUEVO CAMPO DE ANTICIPO/ADELANTO
+            # Campo de entrada para el dinero del adelanto
             anticipo_ini = c4.number_input("Anticipo (C$)", min_value=0.0, value=0.0, step=50.0, 
                                            help="Registra si el paciente deja un abono previo para apartar el espacio.")
             
@@ -1297,7 +1312,6 @@ elif menu == "Agendar Cita Dental":
                 if h_i >= h_f:
                     st.error("La hora de fin debe ser posterior a la de inicio.")
                 else:
-                    # Se mantiene intacta tu función de validación de horarios
                     esta_disponible = verificar_disponibilidad(fecha, h_i, h_f)
                     
                     if not esta_disponible:
@@ -1307,17 +1321,15 @@ elif menu == "Agendar Cita Dental":
                             conn = conectar_db()
                             with conn.cursor() as cursor:
                                 
-                                # 1. Insertamos la cita incluyendo la columna anticipo
+                                # 1. Guardamos la cita (Sin meter 'anticipo' aquí si da problemas, se asienta directo en ingresos)
                                 sql_cita = """
-                                    INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin, anticipo) 
-                                    VALUES (%s, %s, %s, %s, %s)
+                                    INSERT INTO citas (id_paciente, fecha, hora_inicio, hora_fin) 
+                                    VALUES (%s, %s, %s, %s)
                                 """
-                                cursor.execute(sql_cita, (p_id, fecha, h_i, h_f, anticipo_ini))
-                                
-                                # Obtenemos el ID de la cita que se acaba de generar para amarrar el ingreso
+                                cursor.execute(sql_cita, (p_id, fecha, h_i, h_f))
                                 id_cita_nueva = cursor.lastrowid
                                 
-                                # 2. Validación Contable: Si dejó dinero, se asienta de inmediato en ingresos
+                                # 2. Si el usuario de verdad ingresó dinero, lo inyectamos en la tabla ingresos
                                 if anticipo_ini > 0:
                                     sql_ingreso = """
                                         INSERT INTO ingresos (id_cita, id_paciente, monto, concepto, fecha)
@@ -1325,14 +1337,11 @@ elif menu == "Agendar Cita Dental":
                                     """
                                     cursor.execute(sql_ingreso, (id_cita_nueva, p_id, anticipo_ini))
                                 
-                                cursor.close()
                                 conn.commit()
-                                conn.close()
                             
-                            # MENSAJE DE CONFIRMACIÓN ADAPTADO
-                            msg_exito = f"⚖ **Registro Exitoso:** La cita ha sido asentada permanente en la nube el día {fecha.strftime('%d-%m-%Y')}."
+                            msg_exito = f"⚖ **Registro Exitoso:** Cita agendada de forma permanente para el {fecha.strftime('%d-%m-%Y')}."
                             if anticipo_ini > 0:
-                                msg_exito += f" Se registró un abono inicial en caja de C$ {anticipo_ini:,.2f}."
+                                msg_exito += f" Se ingresó un anticipo de C$ {anticipo_ini:,.2f} a caja chica."
                                 
                             st.success(msg_exito)
                             t_sleep.sleep(2.0)
