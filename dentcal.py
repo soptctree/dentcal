@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, time, timedelta
+from datetime import datetime, time, timedelta, date
 import time as t_sleep
 import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
@@ -261,7 +261,7 @@ if menu == "Agenda Diaria Sillon":
     st.subheader("📋 Control de Citas y Búsqueda")
     
     # Separamos limpiamente en dos pestañas
-    tab_agenda, tab_buscador = st.tabs(["🕒 Vista del Día", "🔍 Buscar Cita por Nombre"])
+    tab_agenda, tab_buscador, tab_auditoria = st.tabs(["🕒 Vista del Día", "🔍 Buscar Cita por Nombre", "📊 Auditoría e Historial"])
 
     # ==========================================
     # PESTAÑA 1: VISTA DE LA AGENDA DIARIA
@@ -571,6 +571,102 @@ if menu == "Agenda Diaria Sillon":
                     conn.close()
         else:
             st.info("💡 Escribe el nombre del paciente para ver qué día y a qué hora tiene citas asignadas en el sistema.")
+
+    with tab_auditoria:
+                st.write("### 📊 Historial y Auditoría Global de Citas")
+                st.write("Consulte y supervise el estado de todos los turnos históricos asentados en el sistema.")
+                
+                # --- FILTROS DE BÚSQUEDA ---
+                c1, c2, c3 = st.columns(3)
+                fecha_inicio = c1.date_input("Desde:", value=date.today() - timedelta(days=7), key="audit_desde")
+                fecha_fin = c2.date_input("Hasta:", value=date.today() + timedelta(days=15), key="audit_hasta")
+                
+                estados_seleccionados = c3.multiselect(
+                    "Filtrar por Estado:",
+                    options=["Pendiente", "Asistió", "Ausente", "Cancelada"],
+                    default=["Cancelada", "Ausente", "Asistió"],
+                    key="audit_estados"
+                )
+
+                if fecha_inicio > fecha_fin:
+                    st.error("❌ La fecha de inicio no puede ser mayor a la fecha de fin.")
+                else:
+                    # --- CONSULTA SEGURA A LA BASE DE DATOS ---
+                    conn_audit = None
+                    df_auditoria = pd.DataFrame()
+                    try:
+                        conn_audit = conectar_db()
+                        cursor_audit = conn_audit.cursor()
+                        query_audit = """
+                            SELECT c.id_cita, c.fecha, c.hora_inicio, c.hora_fin, p.nombre, 
+                                IFNULL(p.cedula, 'S/N') as cedula, c.estado 
+                            FROM citas c 
+                            JOIN pacientes p ON c.id_paciente = p.id_paciente 
+                            WHERE c.fecha BETWEEN %s AND %s
+                            ORDER BY c.fecha DESC, c.hora_inicio ASC
+                        """
+                        cursor_audit.execute(query_audit, (fecha_inicio, fecha_fin))
+                        columnas = [desc[0] for desc in cursor_audit.description]
+                        df_auditoria = pd.DataFrame(cursor_audit.fetchall(), columns=columnas)
+                        cursor_audit.close()
+                    except Exception as e:
+                        st.error(f"Error al cargar la auditoría: {e}")
+                    finally:
+                        if conn_audit:
+                            conn_audit.close()
+
+                    # Filtrado local en Pandas
+                    if not df_auditoria.empty and estados_seleccionados:
+                        df_auditoria = df_auditoria[df_auditoria['estado'].isin(estados_seleccionados)]
+
+                    st.write("---")
+                    st.write(f"#### 📋 Registros Encontrados ({len(df_auditoria)} cita/s)")
+
+                    if df_auditoria.empty:
+                        st.info("No se encontraron registros históricos para los filtros seleccionados.")
+                    else:
+                        # Agrupamos cronológicamente por día (de más nuevo a más viejo)
+                        for fecha_grupo, df_dia in df_auditoria.groupby('fecha', sort=False):
+                            fecha_bonita = fecha_grupo.strftime('%A, %d de %B de %Y')
+                            st.markdown(f"##### 📅 {fecha_bonita}")
+                            
+                            # --- INTERFAZ DE MINI-TARJETAS UNIFICADAS ---
+                            html_cards = "<div style='display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;'>"
+                            for _, row_card in df_dia.iterrows():
+                                h_i_txt = (datetime.min + row_card['hora_inicio']).time().strftime('%H:%M') if isinstance(row_card['hora_inicio'], timedelta) else row_card['hora_inicio'].strftime('%H:%M')
+                                
+                                if row_card['estado'] == "Ausente":
+                                    style_bg = "background-color: #ffcccc; border-left: 5px solid #ff0000; color: #a00;"
+                                elif row_card['estado'] == "Cancelada":
+                                    style_bg = "background-color: #e2f0d9; border-left: 5px solid #70ad47; color: #385723;"
+                                elif row_card['estado'] == "Asistió":
+                                    style_bg = "background-color: #d9e1f2; border-left: 5px solid #4472c4; color: #1f3864;"
+                                else:  # Pendiente
+                                    style_bg = "background-color: #fff2cc; border-left: 5px solid #ffc000; color: #7f6000;"
+                                
+                                html_cards += f"""
+                                <div style='padding: 8px 12px; border-radius: 6px; min-width: 130px; text-align: center; font-size: 12px; font-weight: bold; {style_bg}'>
+                                    <span>{row_card['estado']}</span><br>
+                                    <span style='font-size: 11px; font-weight: normal; color: #333;'>{row_card['nombre'].split()[0]}</span><br>
+                                    <span style='font-size: 14px;'>{h_i_txt}</span>
+                                </div>
+                                """
+                            html_cards += "</div>"
+                            st.markdown(html_cards, unsafe_allow_html=True)
+                            
+                            # --- DETALLE EN ACORDEONES ---
+                            for _, row in df_dia.iterrows():
+                                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                                time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+                                
+                                emoji_estado = "⚪" if row['estado'] == "Cancelada" else "❌" if row['estado'] == "Ausente" else "✅" if row['estado'] == "Asistió" else "⏰"
+                                
+                                with st.expander(f"{emoji_estado} {time_range} | 👤 {row['nombre']} ({row['estado']})"):
+                                    st.write(f"**Cédula/ID:** {row['cedula']}")
+                                    st.write(f"**Horario del bloque:** {time_range}")
+                                    st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
+                            st.write("")        
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
