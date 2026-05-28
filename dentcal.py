@@ -426,6 +426,51 @@ if menu == "Agenda Diaria Sillon":
                 if conn:
                     conn.close()
 
+            # --- 3. DETALLE Y ASISTENCIA ---
+            st.write("### 📝 Control de Asistencia")
+            if df_todas.empty:
+                st.info("No hay pacientes agendados para esta fecha.")
+            else:
+                for _, row in df_todas.iterrows():
+                    h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                    h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                    time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+                    
+                    with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({row['estado']})"):
+                        st.write(f"**Cédula/ID:** {row['cedula']}")
+                        
+                        lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
+                        idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
+                        
+                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
+                        
+                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
+                            # 1. Capturamos el momento exacto actual (Fecha y Hora)
+                            ahora = datetime.now()
+                            
+                            # 2. Convertimos la fecha de la cita de forma ultra segura sin usar el tipo 'date' suelto
+                            if isinstance(row['fecha'], datetime):
+                                fecha_cita = row['fecha'].date()
+                            elif hasattr(row['fecha'], 'date'):  # Por si es un objeto date de otra librería
+                                fecha_cita = row['fecha']
+                            else:
+                                # Si viene como cadena de texto (String) desde la base de datos
+                                fecha_cita = datetime.strptime(str(row['fecha']), "%Y-%m-%d").date()
+                            
+                            # 3. Combinamos para obtener el momento exacto de inicio
+                            momento_exacto_cita = datetime.combine(fecha_cita, h_i_obj)
+                            
+                            # 4. Validación estricta: No permitir "Asistió" antes de tiempo
+                            if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
+                                st.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_cita.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                            else:
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                conn.commit()
+                                st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                t_sleep.sleep(1)
+                                st.rerun()        
+
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE (SIN GRÁFICAS)
     # ==========================================
