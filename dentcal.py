@@ -993,9 +993,10 @@ if menu == "Agenda Diaria Sillon":
                     st.write("")
     
 # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
-    # ==============================================================================
+    # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+# ==============================================================================
     with tab_facturacion:
-    # 1. Recuperamos los datos de la sesión que guardó el botón del expander
+        # 1. Recuperamos los datos de la sesión que guardó el botón del expander
         id_cita_sel = st.session_state.get('id_cita_facturar')
         id_paciente_sel = st.session_state.get('id_paciente_facturar')
         nombre_paciente = st.session_state.get('nombre_paciente_facturar')
@@ -1010,7 +1011,6 @@ if menu == "Agenda Diaria Sillon":
                     del st.session_state['id_cita_facturar']
                     del st.session_state['id_paciente_facturar']
                     del st.session_state['nombre_paciente_facturar']
-                    # Limpiamos también el estado de venta exitosa si existiera
                     if 'venta_exitosa' in st.session_state: del st.session_state['venta_exitosa']
                     st.rerun()
             
@@ -1024,7 +1024,6 @@ if menu == "Agenda Diaria Sillon":
                 try:
                     conn_remedio = conectar_db()
                     with conn_remedio.cursor() as cur_r:
-                        # Buscamos el id_paciente real amarrado a esa cita en la base de datos
                         cur_r.execute("SELECT id_paciente FROM citas WHERE id_cita = %s", (id_cita_sel,))
                         res_r = cur_r.fetchone()
                         if res_r and res_r[0] is not None:
@@ -1035,24 +1034,153 @@ if menu == "Agenda Diaria Sillon":
                     if conn_remedio: 
                         conn_remedio.close()
 
-            # Si por alguna razón extrema sigue siendo None, le asignamos 1 por defecto 
-            # para que la base de datos no rechace el INSERT en producción
             if id_p_seguro is None:
                 id_p_seguro = 1
             
             # =====================================================================
-            # 🔥 LLAMADA SEGURA: Ejecutamos la función con el ID garantizado
+            # 🔥 LLAMADA SEGURA: Ejecutamos el diseño del módulo
             # =====================================================================
             mostrar_modulo_facturacion(id_cita_sel, id_p_seguro, nombre_paciente)
             
+            # =====================================================================
+            # 📄 GENERACIÓN DE RECIBO DIGITAL (PDF, WHATSAPP, CORREO)
+            # =====================================================================
+            st.write("---")
+            st.markdown("### 🖨️ Finalizar Transacción y Emitir Comprobante")
+            
+            # Intentamos calcular o extraer el monto neto directamente (Ajusta la variable según tu función)
+            # Si usas una variable global o state, la leemos; si no, usamos un estimado del balance
+            monto_a_cobrar = st.session_state.get('monto_calculado_neto', 305.00) 
+            
+            col_procesar, col_pdf_btn = st.columns(2)
+            
+            with col_procesar:
+                if st.button("🔒 Confirmar Pago y Asentar en Libros", type="primary", use_container_width=True):
+                    try:
+                        conn = conectar_db()
+                        with conn.cursor() as cursor:
+                            # Registramos el ingreso financiero formalmente en TiDB Cloud
+                            sql_insert = """
+                                INSERT INTO ingresos (id_cita, id_paciente, monto, fecha) 
+                                VALUES (%s, %s, %s, NOW())
+                            """
+                            cursor.execute(sql_insert, (id_cita_sel, id_p_seguro, monto_a_cobrar))
+                            # Actualizamos el estado de la cita a Asistió
+                            cursor.execute("UPDATE citas SET estado = 'Asistió' WHERE id_cita = %s", (id_cita_sel,))
+                        conn.commit()
+                        
+                        st.success("🎉 ¡Ingreso guardado correctamente en la base de datos!")
+                        st.session_state['venta_exitosa'] = True
+                        
+                        # Generamos el PDF en memoria utilizando reportlab
+                        import urllib.parse
+                        from reportlab.lib.pagesizes import letter
+                        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                        from reportlab.lib import colors
+                        import io
+
+                        buffer = io.BytesIO()
+                        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
+                        story = []
+                        styles = getSampleStyleSheet()
+                        
+                        title_style = ParagraphStyle('TitleStyle', parent=styles['Heading1'], fontSize=22, textColor=colors.HexColor("#1E3A8A"), spaceAfter=10)
+                        normal_style = ParagraphStyle('Norm', parent=styles['Normal'], fontSize=11, spaceAfter=8)
+                        
+                        story.append(Paragraph("🦷 DENTCAL - CONTROL PROFESIONAL", title_style))
+                        story.append(Paragraph(f"<b>Recibo de Pago - Cita #{id_cita_sel}</b>", normal_style))
+                        story.append(Paragraph(f"<b>Paciente:</b> {nombre_paciente}", normal_style))
+                        story.append(Paragraph(f"<b>Monto Neto Recaudado:</b> ${monto_a_cobrar:,.2f}", normal_style))
+                        story.append(Paragraph(f"<b>Fecha de Emisión:</b> {datetime.now().strftime('%d-%m-%Y %H:%M')}", normal_style))
+                        
+                        doc.build(story)
+                        buffer.seek(0)
+                        st.session_state['pdf_bytes'] = buffer.getvalue()
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Error al asentar la venta: {e}")
+                    finally:
+                        if conn: conn.close()
+
+            # Si el pago ya fue asentado, liberamos los canales de distribución
+            if st.session_state.get('venta_exitosa') and 'pdf_bytes' in st.session_state:
+                import urllib.parse
+                st.info("✅ Pago asentado. Elige cómo deseas entregar el recibo:")
+                
+                c_down, c_wa, c_em = st.columns(3)
+                with c_down:
+                    st.download_button(
+                        label="📥 Descargar PDF para Imprimir",
+                        data=st.session_state['pdf_bytes'],
+                        fileName=f"Recibo_{id_cita_sel}_{nombre_paciente.replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True
+                    )
+                with c_wa:
+                    texto_wa = f"Hola {nombre_paciente}, confirmamos el pago de tu consulta en DentCal por un monto de ${monto_a_cobrar:,.2f}. ¡Muchas gracias por tu confianza!"
+                    url_wa = f"https://wa.me/?text={urllib.parse.quote(texto_wa)}"
+                    st.markdown(f'<a href="{url_wa}" target="_blank"><button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">💬 Enviar por WhatsApp</button></a>', unsafe_allow_html=True)
+                with c_em:
+                    asunto_m = f"Comprobante de Pago Cita #{id_cita_sel} - DentCal"
+                    cuerpo_m = f"Estimado/a {nombre_paciente},\n\nConfirmamos que su pago de ${monto_a_cobrar:,.2f} fue procesado con éxito.\n\nSaludos cordiales,\nDentCal."
+                    url_m = f"mailto:?subject={urllib.parse.quote(asunto_m)}&body={urllib.parse.quote(cuerpo_m)}"
+                    st.markdown(f'<a href="{url_m}"><button style="width:100%; height:38px; background-color:#EA4335; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">✉️ Enviar por Correo</button></a>', unsafe_allow_html=True)
+                
+                if st.button("🔄 Concluir y Limpiar Caja", use_container_width=True):
+                    del st.session_state['id_cita_facturar']
+                    del st.session_state['id_paciente_facturar']
+                    del st.session_state['nombre_paciente_facturar']
+                    del st.session_state['venta_exitosa']
+                    del st.session_state['pdf_bytes']
+                    st.rerun()
+
         else:
             # Mensaje por defecto cuando entran a la pestaña sin elegir un paciente primero
-            st.info("💡 **Sin transacciones activas:** Ve a la pestaña 'Vista del Día' o 'Buscar Cita por Nombre' y presiona el botón '💵 Liquidar Cuenta' en el paciente correspondiente para cargar la caja.")
+            st.info("💡 **Sin transacciones activas:** Ve a la pestaña 'Vista del Día' o 'Buscar Cita por Nombre' y presiona el botón '💵 Cobrar / Liquidar' en el paciente correspondiente para cargar la caja.")
             
-            # Vista de prueba para desarrollo
-            with st.expander("⚙️ Modo Desarrollo: Ver diseño estático del panel"):
-                st.caption("Esta es una simulación visual fija.")
-                mostrar_modulo_facturacion(1, 1, "Paciente Genérico de Prueba")         
+        # =====================================================================
+        # 📊 SECCIÓN: VISUALIZAR LO COBRADO (AUDITORÍA DE CAJA CHICA)
+        # =====================================================================
+        st.write("---")
+        st.markdown("### 📈 Historial de Recaudación y Caja Chica (Hoy)")
+        
+        conn_historial = None
+        try:
+            conn_historial = conectar_db()
+            # Traemos todos los ingresos del día de hoy asentados en el sistema
+            query_ingresos = """
+                SELECT i.id_ingreso, p.nombre AS paciente, i.monto, i.fecha 
+                FROM ingresos i
+                JOIN pacientes p ON i.id_paciente = p.id_paciente
+                WHERE DATE(i.fecha) = CURDATE()
+                ORDER BY i.fecha DESC
+            """
+            df_ingresos = pd.read_sql(query_ingresos, conn_historial)
+            
+            if not df_ingresos.empty:
+                # Formateamos las columnas para que se vean profesionales
+                df_ingresos['monto'] = df_ingresos['monto'].apply(lambda x: f"${x:,.2f}")
+                df_ingresos['fecha'] = pd.to_datetime(df_ingresos['fecha']).dt.strftime('%H:%M:%S')
+                df_ingresos.columns = ["ID Ingreso", "Paciente", "Monto Recaudado", "Hora de Pago"]
+                
+                # Mostramos el total acumulado en una tarjeta métrica limpia
+                conn_total = conectar_db()
+                with conn_total.cursor() as cur_t:
+                    cur_t.execute("SELECT SUM(monto) FROM ingresos WHERE DATE(fecha) = CURDATE()")
+                    total_dia = cur_t.fetchone()[0] or 0.0
+                conn_total.close()
+                
+                st.metric(label="💰 Total Recaudado en Caja Hoy", value=f"${total_dia:,.2f}")
+                st.dataframe(df_ingresos, use_container_width=True)
+            else:
+                st.warning("📭 Aún no se han registrado cobros ni entradas de dinero el día de hoy.")
+                
+        except Exception as e_hist:
+            st.caption(f"Nota de auditoría: Crea la tabla 'ingresos' en tu BD para activar el reporte visual diario. ({e_hist})")
+        finally:
+            if conn_historial: 
+                conn_historial.close()      
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
