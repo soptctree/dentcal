@@ -290,60 +290,53 @@ if menu == "Agenda Diaria Sillon":
             st.metric(label="📅 Citas activas para este día", value=f"{total_citas_hoy} paciente(s)")
             st.write("") 
 
-            # --- CSS INYECTADO CORRECTAMENTE ---
+            # --- CSS ESTABLE INYECTADO SIN INTERRUPCIÓN ---
             st.markdown("""
                 <style>
-                .hour-container {
-                    display: flex !important;
-                    flex-wrap: wrap !important;
-                    gap: 12px !important;
-                    font-family: Arial, sans-serif !important;
-                    margin-bottom: 25px !important;
-                    width: 100% !important;
-                }
-                .hour-card {
-                    flex: 1 1 180px !important;
-                    min-width: 160px !important;
-                    max-width: 220px !important;
-                    padding: 14px 8px !important;
-                    text-align: center !important;
-                    border-radius: 8px !important;
-                    font-weight: bold !important;
-                    font-size: 13px !important;
-                    box-shadow: 0px 2px 4px rgba(0,0,0,0.08) !important;
+                .hour-card-native {
+                    padding: 14px 8px;
+                    text-align: center;
+                    border-radius: 8px;
+                    font-weight: bold;
+                    font-size: 13px;
+                    box-shadow: 0px 2px 4px rgba(0,0,0,0.08);
+                    font-family: Arial, sans-serif;
+                    margin-bottom: 10px;
                 }
                 .card-disponible {
-                    background-color: #DFF2BF !important; 
-                    border: 1px solid #4F8A10 !important; 
-                    color: #4F8A10 !important;
+                    background-color: #DFF2BF; 
+                    border: 1px solid #4F8A10; 
+                    color: #4F8A10;
                 }
                 .card-ocupado {
-                    background-color: #FFD2D2 !important; 
-                    border: 1px solid #D8000C !important; 
-                    color: #D8000C !important;
+                    background-color: #FFD2D2; 
+                    border: 1px solid #D8000C; 
+                    color: #D8000C;
                 }
                 .top-indicator {
-                    display: block !important;
-                    font-size: 11px !important;
-                    font-weight: normal !important;
-                    margin-bottom: 4px !important;
-                    white-space: nowrap !important;
-                    overflow: hidden !important;
-                    text-overflow: ellipsis !important;
+                    display: block;
+                    font-size: 11px;
+                    font-weight: normal;
+                    margin-bottom: 4px;
+                    white-space: nowrap;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
                 }
                 .time-label {
-                    font-size: 16px !important;
-                    display: block !important;
-                    margin-top: 2px !important;
+                    font-size: 16px;
+                    display: block;
+                    margin-top: 2px;
                 }
                 </style>
             """, unsafe_allow_html=True)
 
-            # CONSTRUCCIÓN DEL GRID HTML EN UNA SOLA CADENA DE TEXTO
-            html_grid = "<div class='hour-container'>"
-            horas_base = range(7, 18)  # De 7:00 AM a 5:00 PM
-
-            for hora in horas_base:
+            # RENDERIZADO NATIVO POR COLUMNAS (Evita que el HTML se imprima como texto)
+            horas_base = range(7, 18)  # De 7:00 AM a 5:00 PM (11 bloques)
+            
+            # Creamos una cuadrícula nativa de 4 columnas de ancho para que se acomoden solas
+            cols = st.columns(4)
+            
+            for i, hora in enumerate(horas_base):
                 bloque_inicio = time(hora, 0)
                 bloque_fin = time(hora + 1, 0) if hora < 23 else time(23, 59)
                 
@@ -355,24 +348,22 @@ if menu == "Agenda Diaria Sillon":
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
-                        # Comprobación si el bloque de hora interseca la cita
                         if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
-                            # NUEVO: Muestra el nombre asignado directamente en la tarjeta
                             texto_tarjeta = f"👤 {r['nombre']}"
                             clase_css = "card-ocupado"
                             break
                 
-                html_grid += f"""
-                <div class='hour-card {clase_css}'>
-                    <span class='top-indicator'>{texto_tarjeta}</span>
-                    <span class='time-label'>{bloque_inicio.strftime('%H:%M')}</span>
-                </div>
-                """
+                # Asignamos la tarjeta a la columna correspondiente usando el operador residuo (%)
+                with cols[i % 4]:
+                    card_html = f"""
+                    <div class='hour-card-native {clase_css}'>
+                        <span class='top-indicator'>{texto_tarjeta}</span>
+                        <span class='time-label'>{bloque_inicio.strftime('%H:%M')}</span>
+                    </div>
+                    """
+                    # Renderizamos cada tarjeta por separado de forma segura
+                    st.markdown(card_html, unsafe_allow_html=True)
 
-            html_grid += "</div>"
-            
-            # Renderizado seguro del HTML de las tarjetas
-            st.markdown(html_grid, unsafe_allow_html=True)
             st.divider()
 
             # --- CONTROL DE ASISTENCIA CON VALIDACIÓN EN ADELANTE ---
@@ -412,7 +403,6 @@ if menu == "Agenda Diaria Sillon":
                                     t_sleep.sleep(1)
                                     st.rerun()
                             else:
-                                # Para cambiar a otros estados como Ausente o Cancelada no hay restricción horaria
                                 cursor = conn.cursor()
                                 cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
                                 st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
