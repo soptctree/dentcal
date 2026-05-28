@@ -6,7 +6,7 @@ import pymysql  # Usamos pymysql directamente para mayor estabilidad en la nube
 
 st.set_page_config(
     page_title="DentCal: Gestión Odontológica",
-    page_icon="🦷",  # <--- AQUÍ COLOCAS EL DIENTE
+    page_icon="🦷",  
     layout="wide"
 )
 
@@ -258,277 +258,219 @@ if st.sidebar.button("🚪 Cerrar Sesión", use_container_width=True, type="seco
 
 # --- MÓDULO 1: AGENDA DIARIA ---
 if menu == "Agenda Diaria Sillon":
-    st.subheader("📋 Control de Citas del Día")
-    fecha_agenda = st.date_input("Ver día:", value=datetime.now())
+    st.subheader("📋 Control de Citas y Búsqueda")
     
-    # Formateamos la fecha como texto estable para evitar problemas de tipos con TiDB
-    fecha_str = fecha_agenda.strftime("%Y-%m-%d")
-    
-    conn = conectar_db()
-    query = """
-        SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
-        FROM citas c 
-        JOIN pacientes p ON c.id_paciente = p.id_paciente 
-        WHERE c.fecha = %s 
-        ORDER BY c.hora_inicio ASC
-    """
-    try:
-        # Pasamos la fecha usando tupla de parámetros seguros
-        df_todas = pd.read_sql(query, conn, params=[fecha_str])
-        
-        # Inicializamos df_activas vacío por si df_todas no tiene registros
-        df_activas = pd.DataFrame()
-        if not df_todas.empty:
-            df_activas = df_todas[df_todas['estado'] != 'Cancelada']
-        
-        # --- 🕒 LÓGICA DE OCUPACIÓN Y ESTADÍSTICAS ---
-        horas_base = range(7, 18)  # De 7 AM a 5 PM
-        
-        # Contamos cuántas citas reales (únicas) hay hoy
-        total_citas_hoy = len(df_activas) if not df_activas.empty else 0
+    # Creamos pestañas para organizar la Agenda del día y el nuevo Buscador
+    tab_agenda, tab_buscador = st.tabs(["🕒 Vista del Día", "🔍 Buscar Cita por Nombre"])
 
-        # --- MAPA DE DISPONIBILIDAD ENCAPSULADO POR HORA ---
-        st.write("### 🕒 Ocupación Diaria")
+    # ==========================================
+    # PESTAÑA 1: VISTA DE LA AGENDA DIARIA
+    # ==========================================
+    with tab_agenda:
+        fecha_agenda = st.date_input("Ver día:", value=datetime.now())
+        fecha_str = fecha_agenda.strftime("%Y-%m-%d")
         
-        # Métrica de control rápida
-        st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy} paciente(s)")
-        st.write("") 
-
-        # 1. CSS dinámico para la nueva cuadrícula de horas completas
-        css_bloques = """
-        <style>
-        .hour-container {
-            display: grid !important;
-            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
-            gap: 12px !important;
-            font-family: Arial, sans-serif;
-            margin-bottom: 25px;
-            width: 100%;
-        }
-        .hour-card {
-            border: 1px solid #b5b5b5;
-            padding: 14px 8px;
-            text-align: center;
-            border-radius: 6px;
-            font-weight: bold;
-            font-size: 14px;
-            box-shadow: 0px 2px 4px rgba(0,0,0,0.05);
-            position: relative;
-            color: #222222;
-        }
-        .top-indicator {
-            display: block;
-            font-size: 11px;
-            font-weight: normal;
-            color: #444444;
-            margin-bottom: 4px;
-            background: rgba(255,255,255,0.7);
-            border-radius: 3px;
-            padding: 1px 2px;
-        }
-        .time-label {
-            font-size: 16px;
-            display: block;
-            margin-top: 2px;
-        }
-        </style>
+        conn = conectar_db()
+        query = """
+            SELECT c.id_cita, c.fecha, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
+            FROM citas c 
+            JOIN pacientes p ON c.id_paciente = p.id_paciente 
+            WHERE c.fecha = %s 
+            ORDER BY c.hora_inicio ASC
         """
-        st.markdown(css_bloques, unsafe_allow_html=True)
-
-        html_grid = "<div class='hour-container'>"
-
-        # 2. Iteramos únicamente por hora entera con la matemática de cuartos blindada
-        for hora in horas_base:
-            estados_cuartos = []
-            ultimo_bloque_ocupado = None
+        try:
+            df_todas = pd.read_sql(query, conn, params=[fecha_str])
             
-            # Evaluamos de forma individual los 4 cuartos de esta hora
-            for cuarto in [0, 15, 30, 45]:
-                bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
-                bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
+            df_activas = pd.DataFrame()
+            if not df_todas.empty:
+                df_activas = df_todas[df_todas['estado'] != 'Cancelada']
+            
+            total_citas_hoy = len(df_activas) if not df_activas.empty else 0
+
+            st.metric(label="📅 Citas activas para este día", value=f"{total_citas_hoy} paciente(s)")
+            st.write("") 
+
+            # --- CSS OPTIMIZADO PARA TARJETAS ---
+            css_bloques = """
+            <style>
+            .hour-container {
+                display: grid !important;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)) !important;
+                gap: 12px !important;
+                font-family: Arial, sans-serif;
+                margin-bottom: 25px;
+                width: 100%;
+            }
+            .hour-card {
+                padding: 14px 8px;
+                text-align: center;
+                border-radius: 8px;
+                font-weight: bold;
+                font-size: 13px;
+                box-shadow: 0px 2px 4px rgba(0,0,0,0.08);
+                color: #222222;
+            }
+            .card-disponible {
+                background-color: #DFF2BF; 
+                border: 1px solid #4F8A10; 
+                color: #4F8A10;
+            }
+            .card-ocupado {
+                background-color: #FFD2D2; 
+                border: 1px solid #D8000C; 
+                color: #D8000C;
+            }
+            .top-indicator {
+                display: block;
+                font-size: 11px;
+                font-weight: normal;
+                margin-bottom: 4px;
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+            }
+            .time-label {
+                font-size: 16px;
+                display: block;
+                margin-top: 2px;
+            }
+            </style>
+            """
+            st.markdown(css_bloques, unsafe_allow_html=True)
+
+            # RENDERIZADO DEL MAPA VISUAL (De 7:00 AM a 5:00 PM)
+            html_grid = "<div class='hour-container'>"
+            horas_base = range(7, 18)
+
+            for hora in horas_base:
+                bloque_inicio = time(hora, 0)
+                bloque_fin = time(hora + 1, 0) if hora < 23 else time(23, 59)
                 
                 ocupado = False
+                texto_tarjeta = "Disponible"
+                clase_css = "card-disponible"
+                
                 if not df_activas.empty:
                     for _, r in df_activas.iterrows():
                         inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
                         fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                         
+                        # Si la cita cruza o coincide con esta hora base
                         if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
                             ocupado = True
+                            # NUEVO: Mostramos el nombre del paciente directamente en la tarjeta
+                            texto_tarjeta = f"👤 {r['nombre']}"
+                            clase_css = "card-ocupado"
                             break
                 
-                if ocupado:
-                    estados_cuartos.append(1)
-                    ultimo_bloque_ocupado = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
-                else:
-                    estados_cuartos.append(0)
-            
-            # --- CONSTRUCCIÓN DEL TEXTO INFORMATIVO ---
-            cuartos_ocupados = sum(estados_cuartos)
-            
-            if cuartos_ocupados == 4:
-                texto_arriba = "Ocupado"
-            elif cuartos_ocupados > 0 and ultimo_bloque_ocupado:
-                # El .strftime('%H:%M') convierte automáticamente los 60 minutos en la siguiente hora en punto
-                texto_arriba = f"Hasta las {ultimo_bloque_ocupado.strftime('%H:%M')}"
+                html_grid += f"""
+                <div class='hour-card {clase_css}'>
+                    <span class='top-indicator'>{texto_tarjeta}</span>
+                    <span class='time-label'>{bloque_inicio.strftime('%H:%M')}</span>
+                </div>
+                """
+
+            html_grid += "</div>"
+            st.markdown(html_grid, unsafe_allow_html=True)
+            st.divider()
+
+            # --- CONTROL DE ASISTENCIA REVISADO ---
+            st.write("### 📝 Control de Asistencia")
+            if df_todas.empty:
+                st.info("No hay pacientes registrados para esta fecha.")
             else:
-                texto_arriba = "Disponible"
-            
-            # --- MAQUILLAJE DE FONDOS CON CSS (Pintado exacto por cuartos individuales) ---
-            if cuartos_ocupados == 4:
-                estilo_fondo = "background-color: #FFD2D2; border-color: #D8000C; color: #D8000C;"
-            elif cuartos_ocupados == 0:
-                estilo_fondo = "background-color: #DFF2BF; border-color: #4F8A10; color: #4F8A10;"
-            else:
-                # Creamos un degradado fragmentado de 4 segmentos (25% cada uno)
-                partes_css = []
-                for i, estado in enumerate(estados_cuartos):
-                    color = "#FFD2D2" if estado == 1 else "#DFF2BF"
-                    inicio_pct = i * 25
-                    fin_pct = (i + 1) * 25
-                    partes_css.append(f"{color} {inicio_pct}%, {color} {fin_pct}%")
-                
-                degradado_completo = ", ".join(partes_css)
-                estilo_fondo = f"background: linear-gradient(to right, {degradado_completo}); border-color: #cca4a4;"
-
-            # LINEA TOTALMENTE PLANA SIN SALTOS DE LINEA INVISIBLES
-            html_grid += f"<div class='hour-card' style='{estilo_fondo}'><span class='top-indicator'>📋 {texto_arriba}</span><span class='time-label'>{hora:02d}:00</span></div>"
-
-        html_grid += "</div>"
-        
-        # 4. Renderizado final de la cuadrícula
-        st.markdown(html_grid, unsafe_allow_html=True)
-        st.divider()
-        #############################################
-        # --- SECCIÓN DE ANALÍTICA AVANZADA (MENSUAL Y SEMANAL) ---
-        st.write("---")
-        st.write("### 📈 Análisis y Reportes de Demanda")
-        
-        # 1. Selector principal del tipo de reporte
-        tipo_reporte = st.radio(
-            "Seleccione el tipo de visualización:",
-            options=["Por Mes Cerrado", "Rango de Fechas Libre (Semanal / Entre Meses)"],
-            horizontal=True
-        )
-        
-        # Inicializamos las variables de control de fechas
-        fecha_inicio_query = None
-        fecha_fin_query = None
-
-        if tipo_reporte == "Por Mes Cerrado":
-            col_mes, col_anio = st.columns(2)
-            with col_mes:
-                mes_seleccionado = st.selectbox(
-                    "Seleccione el Mes:",
-                    options=range(1, 13),
-                    format_func=lambda x: ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", 
-                                           "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"][x-1],
-                    index=datetime.now().month - 1
-                )
-            with col_anio:
-                anio_seleccionado = st.selectbox(
-                    "Seleccione el Año:",
-                    options=[datetime.now().year - 1, datetime.now().year, datetime.now().year + 1],
-                    index=1
-                )
-            # Calculamos el primer y último día de ese mes para unificar la consulta SQL
-            fecha_inicio_query = f"{anio_seleccionado}-{mes_seleccionado:02d}-01"
-            # Usamos una matemática simple para el fin de mes
-            if mes_seleccionado == 12:
-                fecha_fin_query = f"{anio_seleccionado}-12-31"
-            else:
-                fecha_fin_query = (datetime(anio_seleccionado, mes_seleccionado + 1, 1) - timedelta(days=1)).strftime("%Y-%m-%d")
-
-        else:
-            # Opción de Rango Libre (Ideal para ver semanas o cruces de meses)
-            col_desde, col_hasta = st.columns(2)
-            with col_desde:
-                fecha_inicio_sel = st.date_input("Desde el día:", value=datetime.now() - timedelta(days=7))
-            with col_hasta:
-                fecha_fin_sel = st.date_input("Hasta el día:", value=datetime.now() + timedelta(days=7))
-            
-            fecha_inicio_query = fecha_inicio_sel.strftime("%Y-%m-%d")
-            fecha_fin_query = fecha_fin_sel.strftime("%Y-%m-%d")
-
-        # 2. Query unificada de alto rendimiento usando rangos seguros (BETWEEN)
-        query_analitica = """
-            SELECT fecha, COUNT(id_cita) as total_citas
-            FROM citas
-            WHERE fecha BETWEEN %s AND %s
-              AND estado != 'Cancelada'
-            GROUP BY fecha
-            ORDER BY fecha ASC
-        """
-        
-        try:
-            # Pasamos los parámetros de fecha calculados de forma segura a TiDB
-            df_mes = pd.read_sql(query_analitica, conn, params=[fecha_inicio_query, fecha_fin_query])
-            
-            if not df_mes.empty:
-                # Convertimos la columna fecha a tipo datetime para formatear el eje X limpiamente
-                df_mes['fecha'] = pd.to_datetime(df_mes['fecha'])
-                
-                # Buscamos el día con más movimiento (El pico más alto)
-                dia_pico_row = df_mes.loc[df_mes['total_citas'].idxmax()]
-                fecha_pico_str = dia_pico_row['fecha'].strftime('%d de %B de %Y')
-                max_citas = dia_pico_row['total_citas']
-                
-                # Métrica informativa destacada para el doctor
-                st.info(f"🔥 **Día de mayor demanda en este rango:** El **{fecha_pico_str}** fue el día más lleno con **{max_citas} citas** agendadas.")
-                
-                # 3. Preparar los datos exclusivos para la gráfica (Eje X: Fecha)
-                df_grafica = df_mes.set_index('fecha')[['total_citas']]
-                
-                # Dibujamos el Gráfico de Barras interactivo nativo de Streamlit
-                st.bar_chart(df_grafica, color="#2471A3")
-                
-                # 4. Tabla detallada abajo para control numérico exacto
-                with st.expander("📄 Ver desglose en tabla detallada"):
-                    df_tabla = df_mes.copy()
-                    df_tabla['Día'] = df_tabla['fecha'].dt.strftime('%A %d-%m-%Y')
-                    df_tabla = df_tabla.rename(columns={'total_citas': 'Cantidad de Citas'})
+                for _, row in df_todas.iterrows():
+                    h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+                    h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+                    time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
                     
-                    st.dataframe(
-                        df_tabla[['Día', 'Cantidad de Citas']], 
-                        use_container_width=True, 
-                        hide_index=True
-                    )
-            else:
-                st.warning("⚠️ No se encontraron citas agendadas para el período seleccionado.")
-                
+                    with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({row['estado']})"):
+                        st.write(f"**Cédula/ID:** {row['cedula']}")
+                        
+                        lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
+                        idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
+                        
+                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
+                        
+                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
+                            ahora = datetime.now()
+                            fecha_cita = row['fecha'] if isinstance(row['fecha'], datetime) else datetime.strptime(str(row['fecha']), "%Y-%m-%d").date()
+                            if isinstance(fecha_cita, datetime):
+                                fecha_cita = fecha_cita.date()
+
+                            # NUEVA LÓGICA DE ASISTENCIA: Estricta desde la fecha y hora exacta en adelante
+                            if nuevo_estado == "Asistió":
+                                momento_cita = datetime.combine(fecha_cita, h_i_obj)
+                                
+                                if ahora < momento_cita:
+                                    st.error(f"❌ **Entrada denegada:** No puedes marcar asistencia antes de tiempo. La cita está programada para el **{fecha_cita.strftime('%d-%m-%Y')}** a las **{h_i_obj.strftime('%H:%M')}**.")
+                                else:
+                                    # Si ya es la hora exacta o ya pasó, se permite guardar con éxito
+                                    cursor = conn.cursor()
+                                    cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                    st.success(f"✔ ¡Asistencia validada correctamente para {row['nombre']}!")
+                                    t_sleep.sleep(1)
+                                    st.rerun()
+                            else:
+                                # Para otros estados (Ausente, Cancelada, Pendiente) no aplica la restricción de tiempo
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                t_sleep.sleep(1)
+                                st.rerun()
+
         except Exception as e:
-            st.error(f"Error al generar las métricas analíticas: {e}")
+            st.error(f"Error en Agenda: {e}")
+        finally:
+            if conn:
+                conn.close()
 
-        # --- 3. DETALLE Y ASISTENCIA ---
-        st.write("### 📝 Control de Asistencia")
-        if df_todas.empty:
-            st.info("No hay pacientes agendados para esta fecha.")
-        else:
-            for _, row in df_todas.iterrows():
-                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
-                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
-                time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+    # ==========================================
+    # PESTAÑA 2: NUEVO BUSCADOR DE CITAS POR NOMBRE
+    # ==========================================
+    with tab_buscador:
+        st.write("### 🔍 Localizador de Citas Olvidadas")
+        nombre_buscar = st.text_input("Escribe el nombre del paciente a consultar:", placeholder="Ej. Josue Ferrey")
+        
+        if nombre_buscar:
+            conn = conectar_db()
+            # Buscador con operador LIKE para encontrar nombres similares o parciales
+            query_buscar = """
+                SELECT p.nombre, c.fecha, c.hora_inicio, c.hora_fin, c.estado
+                FROM citas c
+                JOIN pacientes p ON c.id_paciente = p.id_paciente
+                WHERE p.nombre LIKE %s
+                ORDER BY c.fecha DESC, c.hora_inicio DESC
+            """
+            try:
+                search_term = f"%{nombre_buscar}%"
+                df_busqueda = pd.read_sql(query_buscar, conn, params=[search_term])
                 
-                with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({row['estado']})"):
-                    st.write(f"**Cédula/ID:** {row['cedula']}")
+                if not df_busqueda.empty:
+                    st.success(f"🎉 Se encontraron {len(df_busqueda)} registros coincidentes:")
                     
-                    lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
-                    idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
+                    # Formateamos las columnas para que el usuario las lea de manera bonita
+                    df_visual = df_busqueda.copy()
+                    df_visual['fecha'] = pd.to_datetime(df_visual['fecha']).dt.strftime('%d-%m-%Y')
                     
-                    nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
+                    # Convertir timedeltas/times a texto HH:MM estables
+                    df_visual['hora_inicio'] = df_visual['hora_inicio'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
+                    df_visual['hora_fin'] = df_visual['hora_fin'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
                     
-                    if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                        conn.commit()
-                        st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
-                        t_sleep.sleep(1)
-                        st.rerun()
-
-    except Exception as e:
-        st.error(f"Error en Agenda: {e}")
-    finally:
-        conn.close()
+                    # Renombrar columnas para la tabla de cara al usuario
+                    df_visual.columns = ["Paciente", "Fecha Programada", "Hora Inicio", "Hora Fin", "Estado Actual"]
+                    
+                    # Mostrar los resultados en una tabla limpia de Streamlit
+                    st.dataframe(df_visual, use_container_width=True)
+                else:
+                    st.warning(f"❌ No se encontró ninguna cita registrada para: '{nombre_buscar}'")
+            except Exception as e:
+                st.error(f"Error en la búsqueda: {e}")
+            finally:
+                if conn:
+                    conn.close()
+        else:
+            st.info("💡 Introduce el nombre completo o parcial del paciente arriba para conocer qué días tiene cita asignados.")
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
