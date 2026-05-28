@@ -267,60 +267,75 @@ if menu == "Agenda Diaria Sillon":
     # PESTAÑA 1: VISTA DE LA AGENDA DIARIA
     # ==========================================
     with tab_agenda:
-        fecha_agenda = st.date_input("Ver día:", value=datetime.now())
-        fecha_str = fecha_agenda.strftime("%Y-%m-%d")
-        
-        conn = conectar_db()
-        query = """
-            SELECT c.id_cita, c.fecha, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
-            FROM citas c 
-            JOIN pacientes p ON c.id_paciente = p.id_paciente 
-            WHERE c.fecha = %s 
-            ORDER BY c.hora_inicio ASC
-        """
-        try:
-            df_todas = pd.read_sql(query, conn, params=[fecha_str])
+        # --- MÓDULO 1: AGENDA DIARIA ---
+        if menu == "Agenda Diaria Sillon":
+            st.subheader("📋 Control de Citas del Día")
+            fecha_agenda = st.date_input("Ver día:", value=datetime.now())
             
-            df_activas = pd.DataFrame()
-            if not df_todas.empty:
-                df_activas = df_todas[df_todas['estado'] != 'Cancelada']
+            # Formateamos la fecha como texto estable para evitar problemas de tipos con TiDB
+            fecha_str = fecha_agenda.strftime("%Y-%m-%d")
             
-            total_citas_hoy = len(df_activas) if not df_activas.empty else 0
+            conn = conectar_db()
+            query = """
+                SELECT c.id_cita, c.hora_inicio, c.hora_fin, p.nombre, IFNULL(p.cedula, 'S/N') as cedula, c.estado 
+                FROM citas c 
+                JOIN pacientes p ON c.id_paciente = p.id_paciente 
+                WHERE c.fecha = %s 
+                ORDER BY c.hora_inicio ASC
+            """
+            try:
+                # Pasamos la fecha usando tupla de parámetros seguros
+                df_todas = pd.read_sql(query, conn, params=[fecha_str])
+                
+                # Inicializamos df_activas vacío por si df_todas no tiene registros
+                df_activas = pd.DataFrame()
+                if not df_todas.empty:
+                    df_activas = df_todas[df_todas['estado'] != 'Cancelada']
+                
+                # --- 🕒 LÓGICA DE OCUPACIÓN Y ESTADÍSTICAS ---
+                horas_base = range(7, 18)  # De 7 AM a 5 PM
+                
+                # Contamos cuántas citas reales (únicas) hay hoy
+                total_citas_hoy = len(df_activas) if not df_activas.empty else 0
 
-            st.metric(label="📅 Citas activas para este día", value=f"{total_citas_hoy} paciente(s)")
-            st.write("") 
+                # --- MAPA DE DISPONIBILIDAD ENCAPSULADO POR HORA ---
+                st.write("### 🕒 Ocupación Diaria")
+                
+                # Métrica de control rápida
+                st.metric(label="📅 Citas programadas para hoy", value=f"{total_citas_hoy} paciente(s)")
+                st.write("") 
 
-            # --- CSS ESTABLE INYECTADO SIN INTERRUPCIÓN ---
-            st.markdown("""
+                # 1. CSS dinámico para la nueva cuadrícula de horas completas
+                css_bloques = """
                 <style>
-                .hour-card-native {
+                .hour-container {
+                    display: grid !important;
+                    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) !important;
+                    gap: 12px !important;
+                    font-family: Arial, sans-serif;
+                    margin-bottom: 25px;
+                    width: 100%;
+                }
+                .hour-card {
+                    border: 1px solid #b5b5b5;
                     padding: 14px 8px;
                     text-align: center;
-                    border-radius: 8px;
+                    border-radius: 6px;
                     font-weight: bold;
-                    font-size: 13px;
-                    box-shadow: 0px 2px 4px rgba(0,0,0,0.08);
-                    font-family: Arial, sans-serif;
-                    margin-bottom: 10px;
-                }
-                .card-disponible {
-                    background-color: #DFF2BF; 
-                    border: 1px solid #4F8A10; 
-                    color: #4F8A10;
-                }
-                .card-ocupado {
-                    background-color: #FFD2D2; 
-                    border: 1px solid #D8000C; 
-                    color: #D8000C;
+                    font-size: 14px;
+                    box-shadow: 0px 2px 4px rgba(0,0,0,0.05);
+                    position: relative;
+                    color: #222222;
                 }
                 .top-indicator {
                     display: block;
                     font-size: 11px;
                     font-weight: normal;
+                    color: #444444;
                     margin-bottom: 4px;
-                    white-space: nowrap;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
+                    background: rgba(255,255,255,0.7);
+                    border-radius: 3px;
+                    padding: 1px 2px;
                 }
                 .time-label {
                     font-size: 16px;
@@ -328,92 +343,88 @@ if menu == "Agenda Diaria Sillon":
                     margin-top: 2px;
                 }
                 </style>
-            """, unsafe_allow_html=True)
+                """
+                st.markdown(css_bloques, unsafe_allow_html=True)
 
-            # RENDERIZADO NATIVO POR COLUMNAS (Evita que el HTML se imprima como texto)
-            horas_base = range(7, 18)  # De 7:00 AM a 5:00 PM (11 bloques)
-            
-            # Creamos una cuadrícula nativa de 4 columnas de ancho para que se acomoden solas
-            cols = st.columns(4)
-            
-            for i, hora in enumerate(horas_base):
-                bloque_inicio = time(hora, 0)
-                bloque_fin = time(hora + 1, 0) if hora < 23 else time(23, 59)
-                
-                texto_tarjeta = "Disponible"
-                clase_css = "card-disponible"
-                
-                if not df_activas.empty:
-                    for _, r in df_activas.iterrows():
-                        inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
-                        fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
-                        
-                        if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
-                            texto_tarjeta = f"👤 {r['nombre']}"
-                            clase_css = "card-ocupado"
-                            break
-                
-                # Asignamos la tarjeta a la columna correspondiente usando el operador residuo (%)
-                with cols[i % 4]:
-                    card_html = f"""
-                    <div class='hour-card-native {clase_css}'>
-                        <span class='top-indicator'>{texto_tarjeta}</span>
-                        <span class='time-label'>{bloque_inicio.strftime('%H:%M')}</span>
-                    </div>
-                    """
-                    # Renderizamos cada tarjeta por separado de forma segura
-                    st.markdown(card_html, unsafe_allow_html=True)
+                html_grid = "<div class='hour-container'>"
 
-            st.divider()
-
-            # --- CONTROL DE ASISTENCIA CON VALIDACIÓN EN ADELANTE ---
-            st.write("### 📝 Control de Asistencia")
-            if df_todas.empty:
-                st.info("No hay pacientes registrados para esta fecha.")
-            else:
-                for idx, row in df_todas.iterrows():
-                    h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
-                    h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
-                    time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+                # 2. Iteramos únicamente por hora entera con la matemática de cuartos blindada
+                for hora in horas_base:
+                    estados_cuartos = []
+                    ultimo_bloque_ocupado = None
+                    pacientes_de_la_hora = set()  # Usamos un set para almacenar nombres únicos en esta hora entera
                     
-                    with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({row['estado']})"):
-                        st.write(f"**Cédula/ID:** {row['cedula']}")
+                    # Evaluamos de forma individual los 4 cuartos de esta hora
+                    for cuarto in [0, 15, 30, 45]:
+                        bloque_inicio = datetime.combine(datetime.min, time(hora, cuarto)).time()
+                        bloque_fin = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
                         
-                        lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
-                        idx_actual = lista_estados.index(row['estado']) if row['estado'] in lista_estados else 0
-                        
-                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}_{idx}")
-                        
-                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}_{idx}"):
-                            ahora = datetime.now()
-                            fecha_cita = row['fecha'] if isinstance(row['fecha'], datetime) else datetime.strptime(str(row['fecha']), "%Y-%m-%d").date()
-                            if isinstance(fecha_cita, datetime):
-                                fecha_cita = fecha_cita.date()
-
-                            # VALIDACIÓN SOLICITADA: Solo desde la fecha y hora exacta en adelante
-                            if nuevo_estado == "Asistió":
-                                momento_exacto_cita = datetime.combine(fecha_cita, h_i_obj)
+                        ocupado = False
+                        if not df_activas.empty:
+                            for _, r in df_activas.iterrows():
+                                inicio_cita = (datetime.min + r['hora_inicio']).time() if isinstance(r['hora_inicio'], timedelta) else r['hora_inicio']
+                                fin_cita = (datetime.min + r['hora_fin']).time() if isinstance(r['hora_fin'], timedelta) else r['hora_fin']
                                 
-                                if ahora < momento_exacto_cita:
-                                    st.error(f"❌ **Entrada denegada:** No puedes registrar asistencia antes de tiempo. La cita inicia el **{fecha_cita.strftime('%d-%m-%Y')}** a las **{h_i_obj.strftime('%H:%M')}**.")
-                                else:
-                                    cursor = conn.cursor()
-                                    cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                    st.success(f"✔ ¡Asistencia marcada para {row['nombre']} con éxito!")
-                                    t_sleep.sleep(1)
-                                    st.rerun()
-                            else:
-                                cursor = conn.cursor()
-                                cursor.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                st.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
-                                t_sleep.sleep(1)
-                                st.rerun()
+                                if bloque_inicio < fin_cita and bloque_fin > inicio_cita:
+                                    ocupado = True
+                                    pacientes_de_la_hora.add(r['nombre'])  # Capturamos el nombre de quien ocupa este cuarto
+                                    break
+                        
+                        if ocupado:
+                            estados_cuartos.append(1)
+                            ultimo_bloque_ocupado = (datetime.combine(datetime.min, time(hora, cuarto)) + timedelta(minutes=15)).time()
+                        else:
+                            estados_cuartos.append(0)
+                    
+                    # --- CONSTRUCCIÓN DEL TEXTO INFORMATIVO ---
+                    cuartos_ocupados = sum(estados_cuartos)
+                    
+                    if cuartos_ocupados == 4:
+                        texto_arriba = "Ocupado"
+                    elif cuartos_ocupados > 0 and ultimo_bloque_ocupado:
+                        # El .strftime('%H:%M') convierte automáticamente los 60 minutos en la siguiente hora en punto
+                        texto_arriba = f"Hasta las {ultimo_bloque_ocupado.strftime('%H:%M')}"
+                    else:
+                        texto_arriba = "Disponible"
+                    
+                    # --- CONSTRUCCIÓN DEL TEXTO DEL HOVER (TOOLTIP NATIVO) ---
+                    if pacientes_de_la_hora:
+                        # Si hay más de un paciente en fracciones de la misma hora, los une con comas
+                        tooltip_texto = f"Paciente(s): {', '.join(pacientes_de_la_hora)}"
+                    else:
+                        tooltip_texto = "Horario Disponible"
+                    
+                    # --- MAQUILLAJE DE FONDOS CON CSS (Pintado exacto por cuartos individuales) ---
+                    if cuartos_ocupados == 4:
+                        estilo_fondo = "background-color: #FFD2D2; border-color: #D8000C; color: #D8000C;"
+                    elif cuartos_ocupados == 0:
+                        estilo_fondo = "background-color: #DFF2BF; border-color: #4F8A10; color: #4F8A10;"
+                    else:
+                        # Creamos un degradado fragmentado de 4 segmentos (25% cada uno)
+                        partes_css = []
+                        for i, estado in enumerate(estados_cuartos):
+                            color = "#FFD2D2" if estado == 1 else "#DFF2BF"
+                            inicio_pct = i * 25
+                            fin_pct = (i + 1) * 25
+                            partes_css.append(f"{color} {inicio_pct}%, {color} {fin_pct}%")
+                        
+                        degradado_completo = ", ".join(partes_css)
+                        estilo_fondo = f"background: linear-gradient(to right, {degradado_completo}); border-color: #cca4a4;"
 
-        except Exception as e:
-            st.error(f"Error en Agenda: {e}")
-        finally:
-            if conn:
-                conn.close()
+                    # LÍNEA TOTALMENTE PLANA CON EL ATRIBUTO title ENCARGADO DEL HOVER DEL PUNTERO
+                    html_grid += f"<div class='hour-card' style='{estilo_fondo}' title='{tooltip_texto}'><span class='top-indicator'>📋 {texto_arriba}</span><span class='time-label'>{hora:02d}:00</span></div>"
+
+                html_grid += "</div>"
+                
+                # 4. Renderizado final de la cuadrícula
+                st.markdown(html_grid, unsafe_allow_html=True)
+                st.divider()
+
+            except Exception as e:
+                st.error(f"Error en Agenda: {e}")
+            finally:
+                if conn:
+                    conn.close()
 
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE (SIN GRÁFICAS)
