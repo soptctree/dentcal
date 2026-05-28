@@ -586,111 +586,111 @@ if menu == "Agenda Diaria Sillon":
                 conn.close()
 
         # --- 3. DETALLE Y ASISTENCIA ---
-        st.write("### 📝 Control de Asistencia y Reprogramación")
-        if df_todas.empty:
-            st.info("No hay pacientes agendados para esta fecha.")
-        else:
-            for _, row in df_todas.iterrows():
-                h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
-                h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
-                time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
-                estado_actual = row['estado']
+    st.write("### 📝 Control de Asistencia y Reprogramación")
+    if df_todas.empty:
+        st.info("No hay pacientes agendados para esta fecha.")
+    else:
+        for _, row in df_todas.iterrows():
+            h_i_obj = (datetime.min + row['hora_inicio']).time() if isinstance(row['hora_inicio'], timedelta) else row['hora_inicio']
+            h_f_obj = (datetime.min + row['hora_fin']).time() if isinstance(row['hora_fin'], timedelta) else row['hora_fin']
+            time_range = f"{h_i_obj.strftime('%H:%M')} - {h_f_obj.strftime('%H:%M')}"
+            estado_actual = row['estado']
+            
+            with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({estado_actual})"):
+                st.write(f"**Cédula/ID:** {row['cedula']}")
+                contenedor_mensaje = st.empty()
+                lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
                 
-                with st.expander(f"⏰ {time_range} | 👤 {row['nombre']} ({estado_actual})"):
-                    st.write(f"**Cédula/ID:** {row['cedula']}")
-                    contenedor_mensaje = st.empty()
-                    lista_estados = ["Pendiente", "Asistió", "Ausente", "Cancelada"]
+                # --- PARTE A: CONTROL DE ESTADOS (BLOQUEADO SI ESTÁ CANCELADA) ---
+                if estado_actual == "Cancelada":
+                    st.selectbox("Actualizar estado:", ["Cancelada"], index=0, disabled=True, key=f"upd_{row['id_cita']}")
+                else:
+                    idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
+                    nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
                     
-                    # --- PARTE A: CONTROL DE ESTADOS (BLOQUEADO SI ESTÁ CANCELADA) ---
-                    if estado_actual == "Cancelada":
-                        st.selectbox("Actualizar estado:", ["Cancelada"], index=0, disabled=True, key=f"upd_{row['id_cita']}")
-                    else:
-                        idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
-                        nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
-                        
-                        # Creamos dos columnas para poner los botones en paralelo de forma elegante
-                        col_btn_guardar, col_btn_liquidar = st.columns(2)
-                        
-                        with col_btn_guardar:
-                            if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}", use_container_width=True):
-                                ahora = datetime.now()
-                                fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
-                                momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
-                                
-                                if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                    contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
-                                    t_sleep.sleep(3)
-                                    contenedor_mensaje.empty()
-                                else:
-                                    conn_accion = None
-                                    try:
-                                        conn_accion = conectar_db()
-                                        cursor_accion = conn_accion.cursor()
-                                        cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                        conn_accion.commit()
-                                        cursor_accion.close()
-                                        
-                                        contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
-                                        t_sleep.sleep(1)
-                                        st.rerun()
-                                    except Exception as ex_db:
-                                        st.error(f"Error al actualizar el estado: {ex_db}")
-                                    finally:
-                                        if conn_accion:
-                                            conn_accion.close()
-                        
-                        # --- INYECCIÓN DEL BOTÓN DE FACTURACIÓN ---
-                        with col_btn_liquidar:
-                            if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", use_container_width=True):
-                                # Guardamos los datos clave de esta fila específica en la sesión de Streamlit
-                                st.session_state['id_cita_facturar'] = row['id_cita']
-                                st.session_state['id_paciente_facturar'] = row['id_paciente'] # Asegúrate de que 'id_paciente' venga en tu consulta SQL original de la agenda
-                                st.session_state['nombre_paciente_facturar'] = row['nombre']
-                                st.rerun()
+                    # Creamos dos columnas para poner los botones en paralelo de forma elegante
+                    col_btn_guardar, col_btn_liquidar = st.columns(2)
                     
-                    # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
-                    if estado_actual in ["Cancelada", "Ausente", "Pendiente"]:
-                        st.write("---")
-                        tipo_accion = "🔄 Reprogramar Cita (Cancelada)" if estado_actual == "Cancelada" else "🕒 Trasladar Hora (Retraso/Ausente)"
-                        st.write(f"**{tipo_accion}**")
-                        
-                        c1, c2, c3 = st.columns(3)
-                        nueva_fecha = c1.date_input("Nueva Fecha", value=fecha_agenda, key=f"f_rep_{row['id_cita']}")
-                        nueva_h_i = c2.time_input("Nueva Hora Inicio", value=h_i_obj, key=f"hi_rep_{row['id_cita']}")
-                        nueva_h_f = c3.time_input("Nueva Hora Fin", value=h_f_obj, key=f"hf_rep_{row['id_cita']}")
-                        
-                        if st.button("Aplicar Reubicación Horaria", key=f"btn_rep_{row['id_cita']}"):
-                            if nueva_h_i >= nueva_h_f:
-                                contenedor_mensaje.error("❌ La hora de fin debe ser posterior a la de inicio.")
+                    with col_btn_guardar:
+                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}", use_container_width=True):
+                            ahora = datetime.now()
+                            fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
+                            momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
+                            
+                            if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
+                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                t_sleep.sleep(3)
+                                contenedor_mensaje.empty()
                             else:
-                                esta_disponible = verificar_disponibilidad(nueva_fecha, nueva_h_i, nueva_h_f)
-                                
-                                if not esta_disponible:
-                                    contenedor_mensaje.error("❌ El horario destino seleccionado ya se encuentra ocupado por otra cita activa.")
-                                    t_sleep.sleep(3)
-                                    contenedor_mensaje.empty()
-                                else:
-                                    conn_rep = None
-                                    try:
-                                        conn_rep = conectar_db()
-                                        cursor_rep = conn_rep.cursor()
-                                        sql_update = """
-                                            UPDATE citas 
-                                            SET fecha = %s, hora_inicio = %s, hora_fin = %s, estado = 'Pendiente' 
-                                            WHERE id_cita = %s
-                                        """
-                                        cursor_rep.execute(sql_update, (nueva_fecha, nueva_h_i, nueva_h_f, row['id_cita']))
-                                        conn_rep.commit()
-                                        cursor_rep.close()
-                                        
-                                        contenedor_mensaje.success(f"✅ Cita de {row['nombre']} reubicada con éxito a las {nueva_h_i.strftime('%H:%M')}.")
-                                        t_sleep.sleep(1.5)
-                                        st.rerun()
-                                    except Exception as ex_rep:
-                                        st.error(f"Error al trasladar la cita: {ex_rep}")
-                                    finally:
-                                        if conn_rep:
-                                            conn_rep.close()
+                                conn_accion = None
+                                try:
+                                    conn_accion = conectar_db()
+                                    cursor_accion = conn_accion.cursor()
+                                    cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                    conn_accion.commit()
+                                    cursor_accion.close()
+                                    
+                                    contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                    t_sleep.sleep(1)
+                                    st.rerun()
+                                except Exception as ex_db:
+                                    st.error(f"Error al actualizar el estado: {ex_db}")
+                                finally:
+                                    if conn_accion:
+                                        conn_accion.close()
+                    
+                    # --- INYECCIÓN DEL BOTÓN DE FACTURACIÓN (MÉTODO SEGURO CON .get()) ---
+                    with col_btn_liquidar:
+                        if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", use_container_width=True):
+                            st.session_state['id_cita_facturar'] = row['id_cita']
+                            # Si id_paciente no viene en la consulta de la agenda, usa None para evitar KeyError
+                            st.session_state['id_paciente_facturar'] = row.get('id_paciente', None)
+                            st.session_state['nombre_paciente_facturar'] = row['nombre']
+                            st.rerun()
+                
+                # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
+                if estado_actual in ["Cancelada", "Ausente", "Pendiente"]:
+                    st.write("---")
+                    tipo_accion = "🔄 Reprogramar Cita (Cancelada)" if estado_actual == "Cancelada" else "🕒 Trasladar Hora (Retraso/Ausente)"
+                    st.write(f"**{tipo_accion}**")
+                    
+                    c1, c2, c3 = st.columns(3)
+                    nueva_fecha = c1.date_input("Nueva Fecha", value=fecha_agenda, key=f"f_rep_{row['id_cita']}")
+                    nueva_h_i = c2.time_input("Nueva Hora Inicio", value=h_i_obj, key=f"hi_rep_{row['id_cita']}")
+                    nueva_h_f = c3.time_input("Nueva Hora Fin", value=h_f_obj, key=f"hf_rep_{row['id_cita']}")
+                    
+                    if st.button("Aplicar Reubicación Horaria", key=f"btn_rep_{row['id_cita']}", use_container_width=True):
+                        if nueva_h_i >= nueva_h_f:
+                            contenedor_mensaje.error("❌ La hora de fin debe ser posterior a la de inicio.")
+                        else:
+                            esta_disponible = verificar_disponibilidad(nueva_fecha, nueva_h_i, nueva_h_f)
+                            
+                            if not esta_disponible:
+                                contenedor_mensaje.error("❌ El horario destino seleccionado ya se encuentra ocupado por otra cita activa.")
+                                t_sleep.sleep(3)
+                                contenedor_mensaje.empty()
+                            else:
+                                conn_rep = None
+                                try:
+                                    conn_rep = conectar_db()
+                                    cursor_rep = conn_rep.cursor()
+                                    sql_update = """
+                                        UPDATE citas 
+                                        SET fecha = %s, hora_inicio = %s, hora_fin = %s, estado = 'Pendiente' 
+                                        WHERE id_cita = %s
+                                    """
+                                    cursor_rep.execute(sql_update, (nueva_fecha, nueva_h_i, nueva_h_f, row['id_cita']))
+                                    conn_rep.commit()
+                                    cursor_rep.close()
+                                    
+                                    contenedor_mensaje.success(f"✅ Cita de {row['nombre']} reubicada con éxito a las {nueva_h_i.strftime('%H:%M')}.")
+                                    t_sleep.sleep(1.5)
+                                    st.rerun()
+                                except Exception as ex_rep:
+                                    st.error(f"Error al trasladar la cita: {ex_rep}")
+                                finally:
+                                    if conn_rep:
+                                        conn_rep.close()
 
     # ==========================================
     # PESTAÑA 2: BUSCADOR DE CITAS POR NOMBRE
@@ -701,8 +701,9 @@ if menu == "Agenda Diaria Sillon":
         
         if nombre_buscar:
             conn = conectar_db()
+            # Modificada la consulta para extraer explícitamente c.id_paciente para el cobro desde aquí también
             query_buscar = """
-                SELECT p.nombre, c.fecha, c.hora_inicio, c.hora_fin, c.estado
+                SELECT p.nombre, c.fecha, c.hora_inicio, c.hora_fin, c.estado, c.id_cita, c.id_paciente
                 FROM citas c
                 JOIN pacientes p ON c.id_paciente = p.id_paciente
                 WHERE p.nombre LIKE %s
@@ -714,14 +715,32 @@ if menu == "Agenda Diaria Sillon":
                 
                 if not df_busqueda.empty:
                     st.success(f"🎉 Se encontraron {len(df_busqueda)} registros:")
+                    
+                    # Renderizamos los expanders o botones en el buscador para cobrar directo desde aquí si gustas
                     df_visual = df_busqueda.copy()
                     df_visual['fecha'] = pd.to_datetime(df_visual['fecha']).dt.strftime('%d-%m-%Y')
                     
                     df_visual['hora_inicio'] = df_visual['hora_inicio'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
                     df_visual['hora_fin'] = df_visual['hora_fin'].apply(lambda x: (datetime.min + x).time().strftime('%H:%M') if isinstance(x, timedelta) else x.strftime('%H:%M'))
                     
-                    df_visual.columns = ["Paciente", "Fecha Programada", "Hora Inicio", "Hora Fin", "Estado Actual"]
-                    st.dataframe(df_visual, use_container_width=True)
+                    # Seleccionamos solo las columnas visuales para el dataframe público
+                    df_publico = df_visual[["nombre", "fecha", "hora_inicio", "hora_fin", "estado"]].copy()
+                    df_publico.columns = ["Paciente", "Fecha Programada", "Hora Inicio", "Hora Fin", "Estado Actual"]
+                    st.dataframe(df_publico, use_container_width=True)
+                    
+                    # Añadimos un selector rápido por si quieren liquidar desde los resultados de búsqueda
+                    st.markdown("##### 💵 Cobro rápido desde el Buscador")
+                    opciones_citas = {f"Cita #{r['id_cita']} - {r['nombre']} ({r['fecha']})": r for _, r in df_visual.iterrows()}
+                    cita_seleccionada_busq = st.selectbox("Selecciona una cita encontrada para liquidar:", ["-- Seleccionar --"] + list(opciones_citas.keys()))
+                    
+                    if cita_seleccionada_busq != "-- Seleccionar --":
+                        datos_cita = opciones_citas[cita_seleccionada_busq]
+                        if st.button("🚀 Cargar Factura de esta Cita", use_container_width=True):
+                            st.session_state['id_cita_facturar'] = datos_cita['id_cita']
+                            st.session_state['id_paciente_facturar'] = datos_cita['id_paciente']
+                            st.session_state['nombre_paciente_facturar'] = datos_cita['nombre']
+                            st.toast("✅ Datos cargados. ¡Ve a la pestaña de Facturación!")
+                            st.rerun()
                 else:
                     st.warning(f"❌ No se encontró ninguna cita registrada para: '{nombre_buscar}'")
             except Exception as e:
