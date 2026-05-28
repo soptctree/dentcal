@@ -992,7 +992,9 @@ if menu == "Agenda Diaria Sillon":
                             st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
                     st.write("")
     
-
+# --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+    # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+# ==============================================================================
     # --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
 # ==============================================================================
     with tab_facturacion:
@@ -1032,6 +1034,7 @@ if menu == "Agenda Diaria Sillon":
                     del st.session_state['id_paciente_facturar']
                     del st.session_state['nombre_paciente_facturar']
                     if 'venta_exitosa' in st.session_state: del st.session_state['venta_exitosa']
+                    if 'pdf_bytes' in st.session_state: del st.session_state['pdf_bytes']
                     st.rerun()
             
             st.write("---")
@@ -1070,9 +1073,8 @@ if menu == "Agenda Diaria Sillon":
             
             monto_a_cobrar = st.session_state.get('monto_calculado_neto', 305.00) 
             
-            col_procesar, col_pdf_btn = st.columns(2)
-            
-            with col_procesar:
+            # Verificamos si no se ha asentado el pago todavía para mostrar el botón de confirmación
+            if not st.session_state.get('venta_exitosa'):
                 if st.button("🔒 Confirmar Pago y Asentar en Libros", type="primary", use_container_width=True):
                     try:
                         conn = conectar_db()
@@ -1087,13 +1089,9 @@ if menu == "Agenda Diaria Sillon":
                             cursor.execute("UPDATE citas SET estado = 'Asistió' WHERE id_cita = %s", (id_cita_sel,))
                         conn.commit()
                         
-                        st.success("🎉 ¡Ingreso guardado correctamente en la base de datos!")
-                        st.session_state['venta_exitosa'] = True
-                        
-                        # Generamos el PDF en memoria utilizando reportlab
-                        import urllib.parse
+                        # Generamos el PDF en memoria utilizando reportlab inmediatamente antes del rerun
                         from reportlab.lib.pagesizes import letter
-                        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+                        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
                         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
                         from reportlab.lib import colors
                         import io
@@ -1115,43 +1113,55 @@ if menu == "Agenda Diaria Sillon":
                         
                         doc.build(story)
                         buffer.seek(0)
+                        
+                        # Guardamos de forma segura los bytes en la sesión
                         st.session_state['pdf_bytes'] = buffer.getvalue()
+                        st.session_state['venta_exitosa'] = True
                         st.rerun()
                     except Exception as e:
                         st.error(f"Error al asentar la venta: {e}")
                     finally:
                         if 'conn' in locals() and conn: conn.close()
 
-            # Si el pago ya fue asentado, liberamos los canales de distribución
-            if st.session_state.get('venta_exitosa') and 'pdf_bytes' in st.session_state:
-                import urllib.parse
+            # Si el pago ya fue asentado con éxito y tenemos bytes válidos, mostramos las opciones
+            if st.session_state.get('venta_exitosa'):
                 st.info("✅ Pago asentado. Elige cómo deseas entregar el recibo:")
+                
+                # Obtenemos los bytes de respaldo o creamos unos mínimos si se perdieron en la recarga
+                bytes_comprobante = st.session_state.get('pdf_bytes', b"")
                 
                 c_down, c_wa, c_em = st.columns(3)
                 with c_down:
-                    st.download_button(
-                        label="📥 Descargar PDF para Imprimir",
-                        data=st.session_state['pdf_bytes'],
-                        fileName=f"Recibo_{id_cita_sel}_{nombre_paciente.replace(' ', '_')}.pdf",
-                        mime="application/pdf",
-                        use_container_width=True
-                    )
+                    if len(bytes_comprobante) > 0:
+                        st.download_button(
+                            label="📥 Descargar PDF para Imprimir",
+                            data=bytes_comprobante,
+                            fileName=f"Recibo_{id_cita_sel}_{nombre_paciente.replace(' ', '_')}.pdf",
+                            mime="application/pdf",
+                            use_container_width=True
+                        )
+                    else:
+                        st.caption("⚠️ Error al recuperar el archivo PDF.")
+                        
                 with c_wa:
+                    import urllib.parse
                     texto_wa = f"Hola {nombre_paciente}, confirmamos el pago de tu consulta en DentCal por un monto de ${monto_a_cobrar:,.2f}. ¡Muchas gracias por tu confianza!"
                     url_wa = f"https://wa.me/?text={urllib.parse.quote(texto_wa)}"
                     st.markdown(f'<a href="{url_wa}" target="_blank"><button style="width:100%; height:38px; background-color:#25D366; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">💬 Enviar por WhatsApp</button></a>', unsafe_allow_html=True)
                 with c_em:
+                    import urllib.parse
                     asunto_m = f"Comprobante de Pago Cita #{id_cita_sel} - DentCal"
                     cuerpo_m = f"Estimado/a {nombre_paciente},\n\nConfirmamos que su pago de ${monto_a_cobrar:,.2f} fue procesado con éxito.\n\nSaludos cordiales,\nDentCal."
                     url_m = f"mailto:?subject={urllib.parse.quote(asunto_m)}&body={urllib.parse.quote(cuerpo_m)}"
                     st.markdown(f'<a href="{url_m}"><button style="width:100%; height:38px; background-color:#EA4335; color:white; border:none; border-radius:4px; cursor:pointer; font-weight:bold;">✉️ Enviar por Correo</button></a>', unsafe_allow_html=True)
                 
+                st.write(" ")
                 if st.button("🔄 Concluir y Limpiar Caja", use_container_width=True):
                     del st.session_state['id_cita_facturar']
                     del st.session_state['id_paciente_facturar']
                     del st.session_state['nombre_paciente_facturar']
                     del st.session_state['venta_exitosa']
-                    del st.session_state['pdf_bytes']
+                    if 'pdf_bytes' in st.session_state: del st.session_state['pdf_bytes']
                     st.rerun()
 
         else:
