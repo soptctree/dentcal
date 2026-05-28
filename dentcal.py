@@ -25,6 +25,164 @@ def conectar_db():
         autocommit=True,
         ssl={'ssl': {}}  # 🚨 ESTA LÍNEA ES LA CLAVE: Activa el cifrado TLS obligatorio de TiDB
     )
+####facturacion######
+def mostrar_modulo_facturacion(id_cita_sel, id_paciente_sel, nombre_paciente):
+    st.markdown("### 🧾 Panel de Liquidación y Caja Chica")
+    st.write(f"**Paciente:** {nombre_paciente} | **Código de Cita:** {id_cita_sel}")
+
+    # --- CONTROL DE MEMORIA DE CARGOS ---
+    # Inicializa el "carrito de compras" en la sesión para que no se borre al dar clics
+    if 'items_factura' in st.session_state:
+        if st.session_state.get('cita_actual_factura') != id_cita_sel:
+            st.session_state['items_factura'] = []
+            st.session_state['cita_actual_factura'] = id_cita_sel
+    else:
+        st.session_state['items_factura'] = []
+        st.session_state['cita_actual_factura'] = id_cita_sel
+
+    # --- PANELES EN PARALELO (FISCAL Y ENTRADAS) ---
+    st.write("---")
+    col_izq, col_der = st.columns(2)
+
+    with col_izq:
+        st.write("#### 🛡️ Clasificación Contable (Auditoría)")
+        regimen = st.selectbox(
+            "Seleccione Régimen Fiscal para esta venta:",
+            ["Régimen General", "Cuota Fija"],
+            help="Cuota Fija guarda el ingreso plano sin desglosar impuestos. Régimen General permite registrar IVA y retenciones."
+        )
+        
+        metodo_pago = st.selectbox("Método de Recaudación:", ["Efectivo", "Tarjeta", "Transferencia"])
+        anticipo = st.number_input("Monto de Anticipo / Abono previo dejado ($):", min_value=0.0, value=0.0, step=5.0)
+
+    with col_der:
+        st.write("#### 🦷 Agregar Procedimientos o Insumos")
+        tipo_item = st.selectbox("Categoría del Cargo:", ["Consulta", "Procedimiento", "Insumo"])
+        
+        # Sugerencias rápidas para agilizar el trabajo de la secretaria
+        if tipo_item == "Consulta":
+            desc_sug = "Consulta Odontológica General"
+            precio_sug = 30.0
+        elif tipo_item == "Procedimiento":
+            desc_sug = "Limpieza Profiláctica / Resina"
+            precio_sug = 40.0
+        else:
+            desc_sug = "Insumo: Cepillo Ortodóntico / Medicamento"
+            precio_sug = 10.0
+
+        descripcion = st.text_input("Detalle del concepto:", value=desc_sug)
+        c_cant, c_prec = st.columns(2)
+        cantidad = c_cant.number_input("Cant:", min_value=1, value=1, step=1)
+        precio_uni = c_prec.number_input("Precio Unitario ($):", min_value=0.0, value=precio_sug, step=5.0)
+
+        if st.button("➕ Añadir Línea al Recibo", use_container_width=True):
+            st.session_state['items_factura'].append({
+                "tipo": tipo_item,
+                "descripcion": descripcion,
+                "cantidad": cantidad,
+                "precio": precio_uni,
+                "total": cantidad * precio_uni
+            })
+            st.toast(f"Agregado: {descripcion}")
+            st.rerun()
+
+    # --- TABLA DE DESGLOSE VISUAL ---
+    if st.session_state['items_factura']:
+        st.write("---")
+        st.write("#### 📋 Detalles del Recibo Actual")
+        df_items = pd.DataFrame(st.session_state['items_factura'])
+        st.dataframe(df_items[['tipo', 'descripcion', 'cantidad', 'precio', 'total']], use_container_width=True)
+        
+        if st.button("🗑️ Vaciar Cuenta"):
+            st.session_state['items_factura'] = []
+            st.rerun()
+
+        # --- LÓGICA DE MATEMÁTICA FISCAL ---
+        subtotal = float(df_items['total'].sum())
+        
+        if regimen == "Cuota Fija":
+            iva = 0.00
+            retencion = 0.00
+            st.caption("ℹ️ *Régimen de Cuota Fija seleccionado: El total se registrará neto sin desglosar débitos fiscales.*")
+        else:
+            # En Régimen General, dejamos casillas opcionales por si la consulta está exenta pero vendiste un insumo con IVA
+            c_tax1, c_tax2 = st.columns(2)
+            aplica_iva = c_tax1.checkbox("¿Cobrar IVA (15%) sobre el Subtotal?", value=False)
+            aplica_ir = c_tax2.checkbox("¿Aplicar Retención de IR (2%)?", value=False)
+            
+            iva = subtotal * 0.15 if aplica_iva else 0.00
+            retencion = subtotal * 0.02 if aplica_ir else 0.00
+
+        # El total final a pagar en caja resta el anticipo que el cliente dio antes
+        total_neto = max(0.0, subtotal + iva - retencion - float(anticipo))
+
+        # Cuadro de Resumen Contable Estético
+        st.markdown(f"""
+        <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #1f3864; margin-top:15px;'>
+            <h4 style='margin:0 0 10px 0; color:#1f3864;'>📊 Balance de Cuenta para Auditoría</h4>
+            <table style='width:100%; font-size:14px; border-collapse: collapse;'>
+                <tr><td><b>Subtotal Bruto:</b></td><td style='text-align:right;'>${subtotal:,.2f}</td></tr>
+                <tr><td><b>IVA Cobrado (+):</b></td><td style='text-align:right; color:#2e7d32;'>${iva:,.2f}</td></tr>
+                <tr><td><b>Retención Recibida (-):</b></td><td style='text-align:right; color:#b30000;'>${retencion:,.2f}</td></tr>
+                <tr><td><b>Abono / Anticipo Previo (-):</b></td><td style='text-align:right; color:#0066cc;'>${anticipo:,.2f}</td></tr>
+                <tr style='font-size:18px; font-weight:bold; border-top:1px solid #ccc;'>
+                    <td><span style='color:#1f3864;'>Monto Neto Real a Recaudar:</span></td>
+                    <td style='text-align:right; color:#1f3864;'>${total_neto:,.2f}</td>
+                </tr>
+            </table>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        observaciones = st.text_area("Observaciones Contables / Clínicas:")
+
+        # --- GUARDADO INMUTABLE EN TIDB ---
+        if st.button("🔒 Procesar Venta y Asentar en Libros", type="primary", use_container_width=True):
+            conn_fac = None
+            try:
+                conn_fac = conectar_db()
+                cursor_fac = conn_fac.cursor()
+                
+                # 1. Insertamos la Cabecera de la Factura
+                query_cab = """
+                    INSERT INTO facturas (
+                        id_cita, id_paciente, monto_anticipo, monto_subtotal, monto_total, 
+                        regimen_fiscal, impuesto_iva, retencion_ir, estado_pago, metodo_pago, observaciones
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pagado', %s, %s)
+                """
+                cursor_fac.execute(query_cab, (
+                    id_cita_sel, id_paciente_sel, anticipo, subtotal, total_neto, 
+                    regimen, iva, retencion, metodo_pago, observaciones
+                ))
+                id_factura_generada = cursor_fac.lastrowid
+
+                # 2. Insertamos el desglose de los conceptos uno por uno
+                query_det = """
+                    INSERT INTO detalles_factura (id_factura, tipo_item, descripcion, cantidad, precio_unitario)
+                    VALUES (%s, %s, %s, %s, %s)
+                """
+                for item in st.session_state['items_factura']:
+                    cursor_fac.execute(query_det, (
+                        id_factura_generada, item['tipo'], item['descripcion'], item['cantidad'], item['precio']
+                    ))
+
+                # 3. Forzamos a que la cita cambie automáticamente a estado 'Asistió' al facturarse
+                cursor_fac.execute("UPDATE citas SET estado = 'Asistió' WHERE id_cita = %s", (id_cita_sel,))
+                
+                conn_fac.commit()
+                cursor_fac.close()
+                
+                st.success("🎉 ¡Asiento contable registrado con éxito! Operación guardada para la próxima auditoría.")
+                st.session_state['items_factura'] = []  # Vaciamos el carrito
+                st.session_state['factura_activa'] = False  # Cerramos el módulo
+                st.rerun()
+
+            except Exception as e:
+                st.error(f"Error crítico de persistencia: {e}")
+            finally:
+                if conn_fac:
+                    conn_fac.close()
+    else:
+        st.info("El recibo está vacío. Añada conceptos desde el bloque de la derecha para calcular el desglose financiero.")
     
 
 def validar_login(usuario, contra):
@@ -265,10 +423,11 @@ if menu == "Agenda Diaria Sillon":
     st.subheader("📋 Control de Citas y Búsqueda")
     
     # Separamos limpiamente en tres pestañas
-    tab_agenda, tab_buscador, tab_auditoria = st.tabs([
+    tab_agenda, tab_buscador, tab_auditoria, tab_facturacion = st.tabs([
         "🕒 Vista del Día", 
         "🔍 Buscar Cita por Nombre", 
-        "📊 Auditoría e Historial"
+        "📊 Auditoría e Historial",
+    "💰 Facturación y Caja Chica"
     ])
 
     # ==========================================
@@ -449,32 +608,45 @@ if menu == "Agenda Diaria Sillon":
                         idx_actual = lista_estados.index(estado_actual) if estado_actual in lista_estados else 0
                         nuevo_estado = st.selectbox("Actualizar estado:", lista_estados, index=idx_actual, key=f"upd_{row['id_cita']}")
                         
-                        if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}"):
-                            ahora = datetime.now()
-                            fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
-                            momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
-                            
-                            if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
-                                contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
-                                t_sleep.sleep(3)
-                                contenedor_mensaje.empty()
-                            else:
-                                conn_accion = None
-                                try:
-                                    conn_accion = conectar_db()
-                                    cursor_accion = conn_accion.cursor()
-                                    cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
-                                    conn_accion.commit()
-                                    cursor_accion.close()
-                                    
-                                    contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
-                                    t_sleep.sleep(1)
-                                    st.rerun()
-                                except Exception as ex_db:
-                                    st.error(f"Error al actualizar el estado: {ex_db}")
-                                finally:
-                                    if conn_accion:
-                                        conn_accion.close()
+                        # Creamos dos columnas para poner los botones en paralelo de forma elegante
+                        col_btn_guardar, col_btn_liquidar = st.columns(2)
+                        
+                        with col_btn_guardar:
+                            if st.button("Guardar Cambio", key=f"btn_{row['id_cita']}", use_container_width=True):
+                                ahora = datetime.now()
+                                fecha_segura = fecha_agenda.date() if isinstance(fecha_agenda, datetime) else fecha_agenda
+                                momento_exacto_cita = datetime.combine(fecha_segura, h_i_obj)
+                                
+                                if nuevo_estado == "Asistió" and ahora < momento_exacto_cita:
+                                    contenedor_mensaje.error(f"❌ **Restricción de tiempo:** No se puede marcar asistencia antes del inicio programado. El turno comienza el {fecha_segura.strftime('%d-%m-%Y')} a las {h_i_obj.strftime('%H:%M')}.")
+                                    t_sleep.sleep(3)
+                                    contenedor_mensaje.empty()
+                                else:
+                                    conn_accion = None
+                                    try:
+                                        conn_accion = conectar_db()
+                                        cursor_accion = conn_accion.cursor()
+                                        cursor_accion.execute("UPDATE citas SET estado = %s WHERE id_cita = %s", (nuevo_estado, row['id_cita']))
+                                        conn_accion.commit()
+                                        cursor_accion.close()
+                                        
+                                        contenedor_mensaje.success(f"Estado de {row['nombre']} actualizado a {nuevo_estado}")
+                                        t_sleep.sleep(1)
+                                        st.rerun()
+                                    except Exception as ex_db:
+                                        st.error(f"Error al actualizar el estado: {ex_db}")
+                                    finally:
+                                        if conn_accion:
+                                            conn_accion.close()
+                        
+                        # --- INYECCIÓN DEL BOTÓN DE FACTURACIÓN ---
+                        with col_btn_liquidar:
+                            if st.button("💵 Cobrar / Liquidar", key=f"liq_{row['id_cita']}", use_container_width=True):
+                                # Guardamos los datos clave de esta fila específica en la sesión de Streamlit
+                                st.session_state['id_cita_facturar'] = row['id_cita']
+                                st.session_state['id_paciente_facturar'] = row['id_paciente'] # Asegúrate de que 'id_paciente' venga en tu consulta SQL original de la agenda
+                                st.session_state['nombre_paciente_facturar'] = row['nombre']
+                                st.rerun()
                     
                     # --- PARTE B: HERRAMIENTA DE REPROGRAMACIÓN / TRASLADO DE HORA ---
                     if estado_actual in ["Cancelada", "Ausente", "Pendiente"]:
@@ -747,6 +919,42 @@ if menu == "Agenda Diaria Sillon":
                             st.write(f"**Horario del bloque:** {time_range}")
                             st.info(f"🔒 **Control de Historial:** Este registro se mantiene preservado como auditoría clínica.")
                     st.write("")
+    
+# --- PESTAÑA 4: MÓDULO DE FACTURACIÓN Y LIQUIDACIÓN ---
+    # ==============================================================================
+    with tab_facturacion:
+        # 1. Recuperamos los datos de la sesión que guardó el botón del expander
+        id_cita_sel = st.session_state.get('id_cita_facturar')
+        id_paciente_sel = st.session_state.get('id_paciente_facturar')
+        nombre_paciente = st.session_state.get('nombre_paciente_facturar')
+
+        # 2. Si hay datos válidos seleccionados, disparamos tu función maestra de abajo
+        if id_cita_sel:
+            col_info_pago, col_limpiar = st.columns([0.8, 0.2])
+            with col_info_pago:
+                st.success(f"🛒 **Cuenta Activa:** Facturando a **{nombre_paciente}** (Cita #{id_cita_sel})")
+            with col_limpiar:
+                if st.button("❌ Cancelar Cobro", use_container_width=True):
+                    del st.session_state['id_cita_facturar']
+                    del st.session_state['id_paciente_facturar']
+                    del st.session_state['nombre_paciente_facturar']
+                    st.rerun()
+            
+            st.write("---")
+            
+            # =====================================================================
+            # 🔥 LA LÍNEA CLAVE: Aquí es donde llamamos a la función de la línea 1298
+            # =====================================================================
+            mostrar_modulo_facturacion(id_cita_sel, id_paciente_sel, nombre_paciente)
+            
+        else:
+            # Mensaje por defecto cuando entran a la pestaña sin elegir un paciente primero
+            st.info("💡 **Sin transacciones activas:** Ve a la pestaña 'Vista del Día' o 'Buscar Cita por Nombre' y presiona el botón '💵 Liquidar Cuenta' en el paciente correspondiente para cargar la caja.")
+            
+            # Vista de prueba para desarrollo (puedes descomentarla quitando el '#' si quieres ver cómo dibuja)
+            with st.expander("⚙️ Modo Desarrollo: Ver diseño estático del panel"):
+                st.caption("Esta es una simulación visual fija.")
+                mostrar_modulo_facturacion(1, 1, "Paciente Genérico de Prueba")               
 
 # --- MÓDULO 2: AGENDAR CITA ---
 elif menu == "Agendar Cita Dental":
@@ -1244,163 +1452,3 @@ elif menu == "Configuración":
             
     else:
         st.warning("⚠️ Acceso denegado. Este módulo está reservado exclusivamente para cuentas con rol de Administrador.")
-
-
-####facturacion######
-def mostrar_modulo_facturacion(id_cita_sel, id_paciente_sel, nombre_paciente):
-    st.markdown("### 🧾 Panel de Liquidación y Caja Chica")
-    st.write(f"**Paciente:** {nombre_paciente} | **Código de Cita:** {id_cita_sel}")
-
-    # --- CONTROL DE MEMORIA DE CARGOS ---
-    # Inicializa el "carrito de compras" en la sesión para que no se borre al dar clics
-    if 'items_factura' in st.session_state:
-        if st.session_state.get('cita_actual_factura') != id_cita_sel:
-            st.session_state['items_factura'] = []
-            st.session_state['cita_actual_factura'] = id_cita_sel
-    else:
-        st.session_state['items_factura'] = []
-        st.session_state['cita_actual_factura'] = id_cita_sel
-
-    # --- PANELES EN PARALELO (FISCAL Y ENTRADAS) ---
-    st.write("---")
-    col_izq, col_der = st.columns(2)
-
-    with col_izq:
-        st.write("#### 🛡️ Clasificación Contable (Auditoría)")
-        regimen = st.selectbox(
-            "Seleccione Régimen Fiscal para esta venta:",
-            ["Régimen General", "Cuota Fija"],
-            help="Cuota Fija guarda el ingreso plano sin desglosar impuestos. Régimen General permite registrar IVA y retenciones."
-        )
-        
-        metodo_pago = st.selectbox("Método de Recaudación:", ["Efectivo", "Tarjeta", "Transferencia"])
-        anticipo = st.number_input("Monto de Anticipo / Abono previo dejado ($):", min_value=0.0, value=0.0, step=5.0)
-
-    with col_der:
-        st.write("#### 🦷 Agregar Procedimientos o Insumos")
-        tipo_item = st.selectbox("Categoría del Cargo:", ["Consulta", "Procedimiento", "Insumo"])
-        
-        # Sugerencias rápidas para agilizar el trabajo de la secretaria
-        if tipo_item == "Consulta":
-            desc_sug = "Consulta Odontológica General"
-            precio_sug = 30.0
-        elif tipo_item == "Procedimiento":
-            desc_sug = "Limpieza Profiláctica / Resina"
-            precio_sug = 40.0
-        else:
-            desc_sug = "Insumo: Cepillo Ortodóntico / Medicamento"
-            precio_sug = 10.0
-
-        descripcion = st.text_input("Detalle del concepto:", value=desc_sug)
-        c_cant, c_prec = st.columns(2)
-        cantidad = c_cant.number_input("Cant:", min_value=1, value=1, step=1)
-        precio_uni = c_prec.number_input("Precio Unitario ($):", min_value=0.0, value=precio_sug, step=5.0)
-
-        if st.button("➕ Añadir Línea al Recibo", use_container_width=True):
-            st.session_state['items_factura'].append({
-                "tipo": tipo_item,
-                "descripcion": descripcion,
-                "cantidad": cantidad,
-                "precio": precio_uni,
-                "total": cantidad * precio_uni
-            })
-            st.toast(f"Agregado: {descripcion}")
-            st.rerun()
-
-    # --- TABLA DE DESGLOSE VISUAL ---
-    if st.session_state['items_factura']:
-        st.write("---")
-        st.write("#### 📋 Detalles del Recibo Actual")
-        df_items = pd.DataFrame(st.session_state['items_factura'])
-        st.dataframe(df_items[['tipo', 'descripcion', 'cantidad', 'precio', 'total']], use_container_width=True)
-        
-        if st.button("🗑️ Vaciar Cuenta"):
-            st.session_state['items_factura'] = []
-            st.rerun()
-
-        # --- LÓGICA DE MATEMÁTICA FISCAL ---
-        subtotal = float(df_items['total'].sum())
-        
-        if regimen == "Cuota Fija":
-            iva = 0.00
-            retencion = 0.00
-            st.caption("ℹ️ *Régimen de Cuota Fija seleccionado: El total se registrará neto sin desglosar débitos fiscales.*")
-        else:
-            # En Régimen General, dejamos casillas opcionales por si la consulta está exenta pero vendiste un insumo con IVA
-            c_tax1, c_tax2 = st.columns(2)
-            aplica_iva = c_tax1.checkbox("¿Cobrar IVA (15%) sobre el Subtotal?", value=False)
-            aplica_ir = c_tax2.checkbox("¿Aplicar Retención de IR (2%)?", value=False)
-            
-            iva = subtotal * 0.15 if aplica_iva else 0.00
-            retencion = subtotal * 0.02 if aplica_ir else 0.00
-
-        # El total final a pagar en caja resta el anticipo que el cliente dio antes
-        total_neto = max(0.0, subtotal + iva - retencion - float(anticipo))
-
-        # Cuadro de Resumen Contable Estético
-        st.markdown(f"""
-        <div style='background-color: #f8f9fa; padding: 15px; border-radius: 8px; border-left: 5px solid #1f3864; margin-top:15px;'>
-            <h4 style='margin:0 0 10px 0; color:#1f3864;'>📊 Balance de Cuenta para Auditoría</h4>
-            <table style='width:100%; font-size:14px; border-collapse: collapse;'>
-                <tr><td><b>Subtotal Bruto:</b></td><td style='text-align:right;'>${subtotal:,.2f}</td></tr>
-                <tr><td><b>IVA Cobrado (+):</b></td><td style='text-align:right; color:#2e7d32;'>${iva:,.2f}</td></tr>
-                <tr><td><b>Retención Recibida (-):</b></td><td style='text-align:right; color:#b30000;'>${retencion:,.2f}</td></tr>
-                <tr><td><b>Abono / Anticipo Previo (-):</b></td><td style='text-align:right; color:#0066cc;'>${anticipo:,.2f}</td></tr>
-                <tr style='font-size:18px; font-weight:bold; border-top:1px solid #ccc;'>
-                    <td><span style='color:#1f3864;'>Monto Neto Real a Recaudar:</span></td>
-                    <td style='text-align:right; color:#1f3864;'>${total_neto:,.2f}</td>
-                </tr>
-            </table>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        observaciones = st.text_area("Observaciones Contables / Clínicas:")
-
-        # --- GUARDADO INMUTABLE EN TIDB ---
-        if st.button("🔒 Procesar Venta y Asentar en Libros", type="primary", use_container_width=True):
-            conn_fac = None
-            try:
-                conn_fac = conectar_db()
-                cursor_fac = conn_fac.cursor()
-                
-                # 1. Insertamos la Cabecera de la Factura
-                query_cab = """
-                    INSERT INTO facturas (
-                        id_cita, id_paciente, monto_anticipo, monto_subtotal, monto_total, 
-                        regimen_fiscal, impuesto_iva, retencion_ir, estado_pago, metodo_pago, observaciones
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'Pagado', %s, %s)
-                """
-                cursor_fac.execute(query_cab, (
-                    id_cita_sel, id_paciente_sel, anticipo, subtotal, total_neto, 
-                    regimen, iva, retencion, metodo_pago, observaciones
-                ))
-                id_factura_generada = cursor_fac.lastrowid
-
-                # 2. Insertamos el desglose de los conceptos uno por uno
-                query_det = """
-                    INSERT INTO detalles_factura (id_factura, tipo_item, descripcion, cantidad, precio_unitario)
-                    VALUES (%s, %s, %s, %s, %s)
-                """
-                for item in st.session_state['items_factura']:
-                    cursor_fac.execute(query_det, (
-                        id_factura_generada, item['tipo'], item['descripcion'], item['cantidad'], item['precio']
-                    ))
-
-                # 3. Forzamos a que la cita cambie automáticamente a estado 'Asistió' al facturarse
-                cursor_fac.execute("UPDATE citas SET estado = 'Asistió' WHERE id_cita = %s", (id_cita_sel,))
-                
-                conn_fac.commit()
-                cursor_fac.close()
-                
-                st.success("🎉 ¡Asiento contable registrado con éxito! Operación guardada para la próxima auditoría.")
-                st.session_state['items_factura'] = []  # Vaciamos el carrito
-                st.session_state['factura_activa'] = False  # Cerramos el módulo
-                st.rerun()
-
-            except Exception as e:
-                st.error(f"Error crítico de persistencia: {e}")
-            finally:
-                if conn_fac:
-                    conn_fac.close()
-    else:
-        st.info("El recibo está vacío. Añada conceptos desde el bloque de la derecha para calcular el desglose financiero.")
