@@ -2,3 +2,5 @@ streamlit
 pymysql
 pandas
 cryptography
+reportlab
+openpyxl
